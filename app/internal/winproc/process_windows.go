@@ -138,6 +138,7 @@ func ListenerPortsByPID() (map[uint32]uint16, error) {
 
 // 结构（x64）：DWORD numEntries; MIB_TCPTABLE_OWNER_PID{ DWORD state; DWORD localAddr; DWORD localPort (network order high byte*256+low); ... }[]
 // MIB_TCPROW_OWNER_PID = {dwState, dwLocalAddr, dwLocalPort, dwRemoteAddr, dwRemotePort, dwOwningPid} — 6×4 字节。
+// 字段偏移：dwState@0、dwLocalAddr@4、dwLocalPort@8、dwRemoteAddr@12、dwRemotePort@16、dwOwningPid@20。
 func parseTcpOwnerListenerTable(buf []byte, out map[uint32]uint16) {
 	// 同类前置校验（B24）：下面立即读取 4 字节条目数，缓冲区不足以容纳时直接放弃，
 	// 与 CommandLine 一样不允许越界读。
@@ -145,20 +146,27 @@ func parseTcpOwnerListenerTable(buf []byte, out map[uint32]uint16) {
 		return
 	}
 	n := *(*uint32)(unsafe.Pointer(&buf[0]))
-	rowSize := 24
-	base := 4
+	parseTcpOwnerPIDRows(buf[4:], n, out)
+}
+
+// parseTcpOwnerPIDRows 纯行解析循环：rows 为 MIB_TCPROW_OWNER_PID 数组原始字节。
+// 独立成函数以便用内存构造的表做不依赖真实套接字的单测（B25 清扫指纹）。
+func parseTcpOwnerPIDRows(rows []byte, n uint32, out map[uint32]uint16) {
+	const rowSize = 24
+	const mibTcpStateListen = 2
 	for i := uint32(0); i < n; i++ {
-		off := base + int(i)*rowSize
-		if off+rowSize > len(buf) {
+		off := int(i) * rowSize
+		if off+rowSize > len(rows) {
 			break
 		}
-		state := *(*uint32)(unsafe.Pointer(&buf[off]))
-		const mibTcpStateListen = 2
+		state := *(*uint32)(unsafe.Pointer(&rows[off]))
 		if state != mibTcpStateListen {
 			continue
 		}
-		localPort := uint16(buf[off+6])<<8 | uint16(buf[off+7]) // 网络序
-		pid := *(*uint32)(unsafe.Pointer(&buf[off+20]))
+		// dwLocalPort@8：低 16 位网络序（高字节在前）。旧实现误读 off+6/off+7
+		//（dwLocalAddr 的第 2、3 字节），使端口指纹永不匹配、残留清扫静默失效。
+		localPort := uint16(rows[off+8])<<8 | uint16(rows[off+9])
+		pid := *(*uint32)(unsafe.Pointer(&rows[off+20]))
 		out[pid] = localPort
 	}
 }

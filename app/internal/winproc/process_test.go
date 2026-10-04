@@ -100,6 +100,60 @@ func writeUTF16(t *testing.T, dst []byte, s string) {
 	}
 }
 
+// ---------- B25 清扫指纹：dwLocalPort 偏移修复 ----------
+// MIB_TCPROW_OWNER_PID（x64，6×4 字节）字段偏移：dwState@0、dwLocalAddr@4、
+// dwLocalPort@8、dwRemoteAddr@12、dwRemotePort@16、dwOwningPid@20。
+// 旧实现从 off+6/off+7（dwLocalAddr 的第 2、3 字节）读端口，SweepResiduals 的
+// 「监听端口 ∈ 8101-8110」指纹永不匹配 → 残留 llama-server 静默不清扫
+//（fail-safe 不误杀，所以一直没暴露）。本用例在内存中构造原始表字节，
+// 不依赖真实套接字 / 真实监听进程。
+func TestParseTcpOwnerListenerTableReadsLocalPortAtOffset8(t *testing.T) {
+	const rowSize = 24
+	const wantPID, wantPort = 4242, uint16(8101)
+	buf := make([]byte, 4+2*rowSize)
+	*(*uint32)(unsafe.Pointer(&buf[0])) = 2 // numEntries
+
+	// row 0：LISTEN 行。dwLocalPort 低 16 位为网络序：8101 = 0x1FA5 → [0x1F, 0xA5]。
+	off := 4
+	*(*uint32)(unsafe.Pointer(&buf[off])) = 2            // MIB_TCP_STATE_LISTEN
+	*(*uint32)(unsafe.Pointer(&buf[off+4])) = 0x0100007F // 127.0.0.1
+	buf[off+6], buf[off+7] = 0xDE, 0xAD                  // 干扰字节：旧实现误读此处（=0xDEAD）
+	buf[off+8], buf[off+9] = 0x1F, 0xA5                  // dwLocalPort
+	*(*uint32)(unsafe.Pointer(&buf[off+20])) = wantPID   // dwOwningPid
+
+	// row 1：非 LISTEN（state=5），端口字段合法也不得进入结果。
+	off1 := 4 + rowSize
+	*(*uint32)(unsafe.Pointer(&buf[off1])) = 5
+	buf[off1+8], buf[off1+9] = 0x1F, 0xA6
+	*(*uint32)(unsafe.Pointer(&buf[off1+20])) = 9999
+
+	out := map[uint32]uint16{}
+	parseTcpOwnerListenerTable(buf, out)
+
+	if got, ok := out[wantPID]; !ok || got != wantPort {
+		t.Fatalf("pid=%d 端口解析错误: got=%d ok=%v want=%d", wantPID, got, ok, wantPort)
+	}
+	if _, ok := out[9999]; ok {
+		t.Fatal("非 LISTEN 行不应进入结果")
+	}
+	if len(out) != 1 {
+		t.Fatalf("结果条目=%d want 1", len(out))
+	}
+
+	// 截断保护：声明 3 行但第二行只有 10 字节 → 完整行照常解析，残行跳过，不越界。
+	trunc := make([]byte, 4+rowSize+10)
+	copy(trunc, buf[:4+rowSize])
+	*(*uint32)(unsafe.Pointer(&trunc[0])) = 3
+	out2 := map[uint32]uint16{}
+	parseTcpOwnerListenerTable(trunc, out2)
+	if got, ok := out2[wantPID]; !ok || got != wantPort {
+		t.Fatalf("截断表中完整行解析错误: got=%d ok=%v want=%d", got, ok, wantPort)
+	}
+	if _, ok := out2[9999]; ok {
+		t.Fatal("残行不应被解析")
+	}
+}
+
 // ---------- Task 1.13 Step 2：WaitForExitInfinite 必须是真 INFINITE（B24） ----------
 // 旧写法把"无限"表达成 time.Duration(1<<31-1 ns) → uint32(Milliseconds()) = 2147ms，
 // 看护协程每 2.1s 假醒一次。本测试用一个存活 ~3s 的子进程钉住语义：
