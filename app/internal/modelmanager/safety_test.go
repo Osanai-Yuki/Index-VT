@@ -184,3 +184,27 @@ func TestMaxDownloadBytesCeilingConstant(t *testing.T) {
 		t.Fatalf("maxDownloadBytes = %d，期望 4GiB(4<<30)", maxDownloadBytes)
 	}
 }
+
+// TestVerifyIntegrityUnavailableClassified Finding 1 调用契约：verifyIntegrity 的
+// 失败必须可分类 —— 「官方校验和暂不可得」（fetch 失败 / SHA256SUMS 缺条目）需满足
+// errors.Is(err, ErrChecksumUnavailable)，调用方据此保留已完成的多 GB .part
+// （稍后重试校验，无需重新下载）；「确认不一致」不得匹配该标记，调用方据此删除
+// 损坏字节（避免留下会被误装的坏文件）。分类颠倒会导致两类事故：误删可续传
+// 下载（数据丢失），或保留坏文件。
+func TestVerifyIntegrityUnavailableClassified(t *testing.T) {
+	errFetch := verifyIntegrity("", errors.New("SHA256SUMS 不可达"), "aaaa")
+	if !errors.Is(errFetch, ErrChecksumUnavailable) {
+		t.Errorf("fetch 失败应满足 errors.Is(err, ErrChecksumUnavailable)，实际: %v", errFetch)
+	}
+	errMissing := verifyIntegrity("", nil, "aaaa")
+	if !errors.Is(errMissing, ErrChecksumUnavailable) {
+		t.Errorf("SHA256SUMS 缺条目应满足 errors.Is(err, ErrChecksumUnavailable)，实际: %v", errMissing)
+	}
+	errMismatch := verifyIntegrity("bbbb", nil, "aaaa")
+	if errMismatch == nil {
+		t.Fatal("校验不一致必须报错")
+	}
+	if errors.Is(errMismatch, ErrChecksumUnavailable) {
+		t.Errorf("校验不一致不得匹配 ErrChecksumUnavailable: %v", errMismatch)
+	}
+}

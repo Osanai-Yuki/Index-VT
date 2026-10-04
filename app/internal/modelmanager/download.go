@@ -66,12 +66,11 @@ func isAllowedURL(u *url.URL) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	// IP 字面量：拒绝环回 / 私网 / 链路本地 / 未指定（含云元数据端点
-	// 169.254.169.254）。用 net.ParseIP + 标准谓词而非字符串前缀，
-	// 可覆盖 IPv6、v4-mapped 及其他等价写法。
+	// IP 字面量：拒绝环回 / 私网 / 链路本地 / 组播 / 未指定（含云元数据端点
+	// 169.254.169.254）。复用 isPrivateOrReserved（与 guardedDialContext 的
+	// DNS-pin 共用同一份判定），避免本文件出现两份「私有/保留」谓词。
 	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		if isPrivateOrReserved(ip) {
 			return false
 		}
 	}
@@ -420,8 +419,12 @@ func (m *Manager) startDownload(ctx context.Context, spec ModelSpec, quant Quant
 		return fail("SHA256 计算失败: " + err.Error())
 	}
 	if verr := verifyIntegrity(official, offErr, got); verr != nil {
-		_ = os.Remove(partFile)
-		_ = os.Remove(metaFile)
+		if !errors.Is(verr, ErrChecksumUnavailable) {
+			// 确认损坏：删除，避免留下会被误装的坏文件（坏字节也不可续传复用）。
+			_ = os.Remove(partFile)
+			_ = os.Remove(metaFile)
+		}
+		// 暂不可得（网络/上游）：保留 .part 与 sidecar，用户可稍后重试，无需重新下载。
 		return fail(verr.Error())
 	}
 
@@ -481,16 +484,23 @@ func fetchOfficialSHA256(ctx context.Context, repo, file string, kind SourceKind
 	return "", fmt.Errorf("SHA256SUMS 中未找到 %s", file)
 }
 
+// ErrChecksumUnavailable 官方校验和暂不可得（网络/上游问题，非内容损坏）。
+// 用于区分「拒绝安装但保留下载文件（可稍后重试）」与「确认损坏，删除重下」。
+var ErrChecksumUnavailable = errors.New("官方 SHA256SUMS 暂不可得")
+
 // verifyIntegrity 判定下载完整性。fail-closed：拿不到官方校验和即拒绝。
 // 理由：落盘文件随后会被 llama-server 解析执行，恶意/损坏 GGUF 经张量解析
-// 即构成以用户权限执行代码的路径。缺失校验和时指向既有的「从本地导入」路径，
-// 本版不提供 allowUnverified 风险放行开关（属新增能力，PRD R-7 决定不做）。
+// 即构成以用户权限执行代码的路径。本版不提供 allowUnverified 风险放行开关
+// （属新增能力，PRD R-7 决定不做）。
+// 「暂不可得」（fetch 失败 / SHA256SUMS 缺条目）以 ErrChecksumUnavailable 标出：
+// 调用方拒绝安装但保留下载文件，用户可稍后重试；「校验不一致」为确认损坏，
+// 保持普通错误，调用方删除文件重下。
 func verifyIntegrity(official string, officialErr error, got string) error {
 	if officialErr != nil {
-		return fmt.Errorf("无法获取官方 SHA256SUMS，拒绝安装未校验模型；可先把文件放入 models/ 再用「从本地导入」: %w", officialErr)
+		return fmt.Errorf("无法获取官方 SHA256SUMS（%w），拒绝安装未校验模型；下载文件已保留，可稍后重试，无需重新下载: %w", officialErr, ErrChecksumUnavailable)
 	}
 	if official == "" {
-		return fmt.Errorf("官方 SHA256SUMS 缺少该文件条目，拒绝安装未校验模型")
+		return fmt.Errorf("官方 SHA256SUMS 缺少该文件条目，暂无法校验，拒绝安装未校验模型；下载文件已保留，可稍后重试: %w", ErrChecksumUnavailable)
 	}
 	if !strings.EqualFold(official, got) {
 		return fmt.Errorf("SHA256 校验失败：期望 %s，实际 %s", official, got)
