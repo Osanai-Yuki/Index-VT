@@ -30,7 +30,7 @@
 | B3 | 缺 `SubGetDoc` 绑定 | 1.10 | | B19 | CSV 公式注入 | 1.11 |
 | B4 | 非终态事件被丢弃 | 1.9 | | B20 | `SaveGlossary` 无事务 | 1.8 |
 | B5 | `RetryCues` 预清空丢原译文 | 1.10 | | B21 | `ListHistory` offset 溢出 | 1.8 |
-| B6 | 队列 ctx 泄漏 | 1.9 | | B22 | SSE 取消丢文本 / 缓冲无上限 | 1.4 |
+| B6 | 队列 ctx 泄漏 | 1.9 | | B22 | SSE 取消丢文本 / 缓冲无上限 / **首字节 60s 看门狗** | 1.4 + 最终修复波次 |
 | B7 | 解锁后读 `cue` | 1.9 | | B23 | `Translate` 不可取消 ctx | 1.18 |
 | B8 | `a.cfg` 无锁共享 | 1.7 | | B24 | 假 INFINITE / handle 生命周期 | 1.13 |
 | B9 | `SetActiveModel` 互相覆盖 | 1.7 | | B24 | `CREATE_NO_WINDOW` 致强杀 | 1.14 |

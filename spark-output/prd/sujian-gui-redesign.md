@@ -757,7 +757,7 @@ cue 表是本产品最核心的操作界面。翻译进度与译文必须实时�
 
 ### 已识别但未修复的问题（进 backlog，不在本版）
 
-- `store.go:49` `migrate` 在 `user_version == 1` 时跳过建表
+- ~~`store.go:49` `migrate` 在 `user_version == 1` 时跳过建表~~ —— **已于执行期推翻（R19）**：全新库 `user_version == 0`，会正常建全部表，`TestMigrateCreatesAllTables` 在修复前即通过。此条为审计误判，非缺陷，**不得再当欠账**。
 - `ImportGGUF`、`docpipeline` 整包、`paths.PartDir`、`sse.go:190` `textBytes` 不可达（用户选择不清理死代码）
 - `app.go:215/216/271/340/345/452/621`、`manager.go:215/221` 的 `_ =` 忽略错误
 - `envprobe.go:99` 遗留的 no-op 注释分支
