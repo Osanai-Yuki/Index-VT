@@ -58,6 +58,44 @@ func chatRequestForTest() ChatRequest {
 	}
 }
 
+// 中途断流（非取消）时已流式文本也必须保留（B22① 上一层遗漏）：
+// 服务器发出部分 delta 后崩溃断连（非取消、非正常收尾），Translate 仍需带出已产出文本。
+func TestTranslateKeepsPartialTextOnMidStreamError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl, _ := w.(http.Flusher)
+		for i := 0; i < 2; i++ {
+			if _, err := fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"字%d \"}}]}\n\n", i); err != nil {
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		// 流中途服务器崩溃：abort 连接（不写终止 chunk），客户端读到非 EOF 错误。
+		panic(http.ErrAbortHandler)
+	}))
+	defer srv.Close()
+
+	tr := NewTranslator(Deps{
+		ResolveEndpoint: func(ctx context.Context, modelID string) (string, string, error) {
+			return srv.URL, "", nil
+		},
+		ModelForMode: func(m ModeKind) string { return "index-translate-2b" },
+		ModelName:    func(modelID string) string { return "index-translate-2b" },
+	}, nil)
+
+	res, err := tr.Translate(context.Background(), TranslateRequest{
+		TaskID: "t-partial-error", TargetLang: "en", Text: "你好",
+	}, nil)
+	if err == nil || errors.Is(err, ErrCanceled) {
+		t.Fatalf("期望非取消的中途断流错误，得到 err=%v", err)
+	}
+	if res.Output == "" {
+		t.Fatalf("中途断流后已流式文本被丢弃：Output=%q（应非空）", res.Output)
+	}
+}
+
 // 服务器迟迟不发事件边界时，事件缓冲必须有上限，且已流式文本仍须保留（B22②）。
 func TestChatStreamEventBufferOverflow(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -134,7 +134,7 @@ func (t *Translator) Translate(ctx context.Context, req TranslateRequest, onDelt
 		if runCtx.Err() != nil || ctx.Err() != nil {
 			return TranslateResult{Output: result.Text}, ErrCanceled
 		}
-		return TranslateResult{}, fmt.Errorf("推理请求失败: %w", err)
+		return TranslateResult{Output: result.Text}, fmt.Errorf("推理请求失败: %w", err)
 	}
 
 	out := TranslateResult{
