@@ -6,9 +6,11 @@ import (
 	"strings"
 )
 
-// Contains 返回 target 的绝对净化路径；若它不是 base 目录内的真实文件则报错。
+// Contains 返回 target 的绝对净化路径；仅做词法包含检查：target 必须位于 base 内
+// 且不得等于 base 本身，否则报错。不检查目标是否真实存在（调用方在文件尚未落盘的
+// 流程里也依赖这个纯词法保证），也不跟随符号链接：models/ 位于用户自有目录，
+// 软链逃逸面不在此威胁模型内。
 // 用途：AssignUnknown / Delete 等「路径来自前端」的绑定必须过此关（spec B16/B17）。
-// 只比较路径、不跟随符号链接：models/ 位于用户自有目录，软链逃逸面不在此威胁模型内。
 func Contains(base, target string) (string, error) {
 	absBase, err := filepath.Abs(filepath.Clean(base))
 	if err != nil {
