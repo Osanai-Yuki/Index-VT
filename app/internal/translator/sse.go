@@ -5,12 +5,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// ErrStreamBufferOverflow：服务器迟迟不发事件边界，拒绝继续缓冲（B22②）。
+var ErrStreamBufferOverflow = errors.New("推理响应数据异常（SSE 事件缓冲超限）")
+
+// maxEventBuf 单条 SSE 事件上限 1MB；正常 data: 行远小于此。
+const maxEventBuf = 1 << 20
 
 // ============================================================================
 // OpenAI 兼容 chat 客户端（llama-server /v1/chat/completions）
@@ -240,9 +247,16 @@ func (c *chatClient) ChatStream(ctx context.Context, req ChatRequest, onDelta fu
 				}
 				break
 			}
+			// 取消/读错误：已流式文本必须保留（旧实现在此丢失全部输出，B22①）
+			finalizeStream(&result, full.String(), firstToken, tokenCount, start)
 			return result, err
 		}
 		eventBuf.WriteByte(chunk)
+		if eventBuf.Len() > maxEventBuf {
+			// 服务器迟迟不发事件边界：拒绝继续缓冲，已收到的部分仍返回（B22②）
+			finalizeStream(&result, full.String(), firstToken, tokenCount, start)
+			return result, fmt.Errorf("%w：超过 %d 字节", ErrStreamBufferOverflow, maxEventBuf)
+		}
 		// 事件边界：空行。兼容 "\n\n" 与 "\r\n\r\n"；逐 data: 行刷新亦是安全的
 		//（llama-server 单行 JSON；字节缓冲保证多字节 token 不被拆分）。
 		b := eventBuf.Bytes()
@@ -258,19 +272,26 @@ func (c *chatClient) ChatStream(ctx context.Context, req ChatRequest, onDelta fu
 		}
 	}
 
-	result.Text = stripThink(full.String())
-	result.FirstTokenLatency = firstToken
-	result.Chunks = tokenCount
-	if result.CompletionTokens == 0 {
-		result.CompletionTokens = tokenCount
+	finalizeStream(&result, full.String(), firstToken, tokenCount, start)
+	return result, nil
+}
+
+// finalizeStream 统一固化统计，供正常/取消/溢出三个返回点复用。
+// 调用前 result.CompletionTokens 应已由 flushEvent 的 usage chunk 写入；
+// 为 0 时回落为实际产出的 tokenCount。
+func finalizeStream(r *StreamResult, full string, firstToken time.Duration, tokenCount int, start time.Time) {
+	r.Text = stripThink(full)
+	r.FirstTokenLatency = firstToken
+	r.Chunks = tokenCount
+	if r.CompletionTokens == 0 {
+		r.CompletionTokens = tokenCount
 	}
-	if firstToken > 0 {
+	if firstToken > 0 && r.CompletionTokens > 1 {
 		elapsed := time.Since(start) - firstToken
-		if result.CompletionTokens > 1 && elapsed > 0 {
-			result.TokensPerSec = float64(result.CompletionTokens) / elapsed.Seconds()
+		if elapsed > 0 {
+			r.TokensPerSec = float64(r.CompletionTokens) / elapsed.Seconds()
 		}
 	}
-	return result, nil
 }
 
 // StreamResult 流式结果统计。
