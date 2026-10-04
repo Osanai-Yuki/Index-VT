@@ -9,6 +9,7 @@
     "verify:theme": "node scripts/verify-theme.mjs",
     "verify:a11y": "node scripts/verify-a11y.mjs",
     "verify:wails": "node scripts/verify-wails.mjs",
+    "verify:lib": "node scripts/verify-lib.mjs",
     "build": "npm run lint:design && tsc --noEmit && vite build",
     "preview": "vite preview"
   },
