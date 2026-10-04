@@ -175,8 +175,11 @@
   --suj-h-status: 32px;       /* 状态栏 */
 
   /* §3.5 行文限宽：阅读区文本块 max-width，在栏内居中。
-     大面积留白靠限制行文宽度产生，不靠加 padding。 */
+     大面积留白靠限制行文宽度产生，不靠加 padding。
+     第二档 --suj-measure-body（40ch）是 §5.10 EmptyState 正文限宽的 token 化
+     （§10 禁止 max-w-[40ch] 任意值；已回写 DESIGN.md §3.5）。 */
   --suj-measure-read: 72ch;
+  --suj-measure-body: 40ch;
 
   /* §4.4 z 序：面板 0 → popover 10 → drawer 20 → modal 30 → toast 40 → palette 50 */
   --suj-z-popover: 10;

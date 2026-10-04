@@ -115,6 +115,8 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 
 阅读区文本块 `max-width: 72ch`（token `--measure-read`，实现名 `--suj-measure-read`，见 §9）并在栏内居中。**大面积留白靠限制行文宽度产生，不靠加 padding**——1920 宽下双栏每栏 860px 的中文不可读。§10 禁止 `max-w-[72ch]` 任意值，故必须立此 token，2.5–2.9 与 Track C 一律引用它。
 
+第二档：空态正文限宽 `40ch`（token `--measure-body`，实现名 `--suj-measure-body`，见 §9），§5.10 EmptyState 消费。同理禁任意值，Token 于 Task 2.6 补齐。
+
 ---
 
 ## 4. 几何 token

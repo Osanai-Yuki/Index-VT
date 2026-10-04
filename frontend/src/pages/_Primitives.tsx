@@ -6,16 +6,24 @@
 // 也是 2.10 对比度/键盘/reduced-motion 实测的唯一页面。
 // 每节 <section aria-labelledby> + 标题；交互组件一律受控。
 import { useState } from 'react'
-import { FileText, Pause, Play, Settings, Trash2 } from 'lucide-react'
+import { FileText, Inbox, Pause, Play, Settings, Trash2 } from 'lucide-react'
 import {
   Badge,
   Button,
   Checkbox,
+  EmptyState,
+  Field,
   IconButton,
   Kbd,
+  NumberField,
+  Progress,
   Segmented,
+  Skeleton,
+  Slider,
   Spinner,
+  Surface,
   Switch,
+  Textarea,
 } from '../components/ui/index'
 // 注意：并存期旧 src/components/ui.tsx 会遮蔽 '../components/ui' 短路径（文件优先于目录），
 // 故显式导入 ui/index；Track C 删除旧 ui.tsx 后可改回短路径。
@@ -48,6 +56,9 @@ export default function PrimitivesPage() {
   const [cb1, setCb1] = useState(true)
   const [cb2, setCb2] = useState(false)
   const [cb3, setCb3] = useState(false)
+  const [num, setNum] = useState(4)
+  const [slide, setSlide] = useState(30)
+  const [text, setText] = useState('')
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-12 px-6 py-10">
@@ -186,6 +197,78 @@ export default function PrimitivesPage() {
           <Trash2 size={16} strokeWidth={1.75} className="text-ink2" aria-hidden="true" />
           <Settings size={16} strokeWidth={1.75} className="text-ink2" aria-hidden="true" />
         </Row>
+      </Section>
+
+      <Section id="sec-field" title="Field / Input（§5.5，label 必填）">
+        <div className="grid max-w-md grid-cols-1 gap-5">
+          <Field label="模型目录" placeholder="C:\models" hint="GGUF 文件所在目录" />
+          <Field label="检索关键词" placeholder="输入以过滤" size="sm" />
+          <Field label="API 地址" defaultValue="http://localhost:8080" error="端口已被占用，请更换" />
+          <Field label="禁用态" placeholder="不可编辑" disabled />
+        </div>
+      </Section>
+
+      <Section id="sec-number" title="NumberField（mono + 右对齐）">
+        <div className="max-w-xs">
+          <NumberField label="并发数" value={num} onChange={setNum} min={1} max={16} step={1} hint="1–16" />
+        </div>
+        <p className="num text-caption text-ink3">当前 = {num}</p>
+      </Section>
+
+      <Section id="sec-textarea" title="Textarea（§5.5）">
+        <div className="flex w-full flex-col gap-6">
+          <Textarea label="原文" rows={3} value={text} onChange={(e) => setText(e.target.value)} />
+          <Textarea label="译文（阅读态 · 72ch 限宽）" rows={3} read defaultValue="译文文本块以 15.5px / 1.9 行高呈现，限宽 72ch 并在栏内居中。" />
+          <Textarea label="带错误" rows={2} error="内容超出上限" />
+        </div>
+      </Section>
+
+      <Section id="sec-slider" title="Slider（原生 range + accent）">
+        <div className="max-w-md">
+          <Slider label="上下文窗口" min={0} max={100} value={slide} onChange={setSlide} formatValue={(n) => `${n}%`} />
+        </div>
+      </Section>
+
+      <Section id="sec-surface" title="Surface（§5.8，无边框无阴影）">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Surface>
+            <p className="text-body text-ink1">阅读态 · padding 24</p>
+          </Surface>
+          <Surface dense>
+            <p className="text-body text-ink1">操作态 · padding 16</p>
+          </Surface>
+        </div>
+      </Section>
+
+      <Section id="sec-empty" title="EmptyState（§5.10，无点阵背景）">
+        <Surface>
+          <EmptyState
+            icon={<Inbox size={48} strokeWidth={1.5} />}
+            title="还没有术语"
+            body="导入 CSV 或手动添加第一条术语，翻译时将自动匹配。"
+            action={
+              <Button kind="primary" size="lg">
+                导入术语
+              </Button>
+            }
+          />
+        </Surface>
+      </Section>
+
+      <Section id="sec-skeleton" title="Skeleton（§5.11，opacity shimmer）">
+        <div className="flex w-full max-w-md flex-col gap-4">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton rows={4} />
+        </div>
+      </Section>
+
+      <Section id="sec-progress" title="Progress（scaleX 填充）">
+        <div className="flex w-full max-w-md flex-col gap-4">
+          <Progress pct={30} label="模型下载进度" />
+          <Progress pct={72} tone="ok" label="字幕队列进度" />
+          <Progress pct={90} tone="warn" label="显存占用" />
+          <Progress pct={100} label="已完成" />
+        </div>
       </Section>
     </main>
   )
