@@ -10,15 +10,19 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"indexvt/internal/winproc"
 )
 
-// spawnProc 以 CREATE_NO_WINDOW 启动子进程，stdout/stderr 重定向到日志文件，
-// 返回进程句柄（同步等待语义由调用方在句柄上实现）。
+// spawnProc 以 CREATE_NEW_CONSOLE|CREATE_SUSPENDED 启动子进程，stdout/stderr
+// 重定向到日志文件，入 job 后才放行主线程，返回进程句柄（同步等待语义由调用方
+// 在句柄上实现）。
+//
 // 安全：可执行文件与参数已经 validateExecutable/sanitizeArgs 白名单校验，
 // 参数经 syscall.EscapeArg 逐个转义后拼成命令行，不经任何 shell。
 // 注意：日志句柄必须以 bInheritHandle=TRUE 创建（Go os.OpenFile 的句柄不可继承，
 // 子进程会拿到无效 std 句柄——M2 实测导致 llama-server 随机退出）。
-func spawnProc(exe string, args []string, dir, logPath string) (windows.Handle, uint32, error) {
+func spawnProc(exe string, args []string, dir, logPath string, job windows.Handle) (windows.Handle, uint32, error) {
 	if err := validateExecutable(exe); err != nil {
 		return 0, 0, err
 	}
@@ -76,19 +80,41 @@ func spawnProc(exe string, args []string, dir, logPath string) (windows.Handle, 
 	windows.SetFilePointer(logHandle, 0, nil, windows.FILE_END)
 
 	const startfUseStdHandles = 0x00000100
+	const startfUseShowWindow = 0x00000001
 	var si windows.StartupInfo
 	si.Cb = uint32(unsafe.Sizeof(si))
-	si.Flags = startfUseStdHandles
+	si.Flags = startfUseStdHandles | startfUseShowWindow
 	si.StdOutput = logHandle
 	si.StdErr = logHandle
 
-	const createNoWindow = 0x08000000
+	// CREATE_NEW_CONSOLE + SW_HIDE：子进程获得自己的（隐藏）控制台，
+	// CTRL_BREAK 才可达——旧写法 CREATE_NO_WINDOW 让优雅停止路径永久不可达（B24）：
+	// 无控制台的进程收不到 GenerateConsoleCtrlEvent，每次停止都退化为 ~3.3s 后强杀。
+	// SW_HIDE 需要 STARTF_USESHOWWINDOW 才生效，否则隐藏控制台口惠而实不至。
+	// CREATE_SUSPENDED：CreateProcess 成功后主线程保持挂起，加入 job 之后才
+	// ResumeThread，消除"父进程在 CreateProcess 与 AssignToJob 之间崩溃 → 子进程
+	// 在 job 兜底之外变孤儿"的窗口期（B24）。
+	si.ShowWindow = windows.SW_HIDE
 	var pi windows.ProcessInformation
 	err = windows.CreateProcess(
-		appName, cmdline, nil, nil, true /*inherit handles: log file*/, createNoWindow,
+		appName, cmdline, nil, nil, true, /*inherit handles: log file*/
+		windows.CREATE_NEW_CONSOLE|windows.CREATE_SUSPENDED,
 		nil, dirU16, &si, &pi)
 	if err != nil {
 		return 0, 0, fmt.Errorf("CreateProcess(llama-server): %w", err)
+	}
+	// job 兜底必须在放行主线程前生效；失败即终止仍挂起的子进程，不留半启动状态。
+	if err := winproc.AssignToJob(job, pi.Process); err != nil {
+		_ = windows.TerminateProcess(pi.Process, 1)
+		windows.CloseHandle(pi.Thread)
+		windows.CloseHandle(pi.Process)
+		return 0, 0, fmt.Errorf("llama-server 加入 Job Object 失败: %w", err)
+	}
+	if _, err := windows.ResumeThread(pi.Thread); err != nil {
+		_ = windows.TerminateProcess(pi.Process, 1)
+		windows.CloseHandle(pi.Thread)
+		windows.CloseHandle(pi.Process)
+		return 0, 0, fmt.Errorf("ResumeThread(llama-server): %w", err)
 	}
 	// 主线程句柄不需要
 	windows.CloseHandle(pi.Thread)

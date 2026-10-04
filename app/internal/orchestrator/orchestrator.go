@@ -448,15 +448,14 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 	if err != nil {
 		return fmt.Errorf("创建 Job Object 失败: %w", err)
 	}
-	handle, pid, err := spawnProc(exe, args, paths.BaseDir(), llamaLogPath())
+	handle, pid, err := spawnProc(exe, args, paths.BaseDir(), llamaLogPath(), job)
 	if err != nil {
 		winproc.CloseJob(job)
 		return err
 	}
+	// job 分配已在 spawnProc 内、ResumeThread 之前完成（B24：消除孤儿窗口期），
+	// 无需再在 CreateProcess 之后补 AssignToJob。
 	o.log.Info("llama-server spawned", "pid", pid)
-	if err := winproc.AssignToJob(job, handle); err != nil {
-		o.log.Warn("AssignToJob 失败（崩溃兜底不可用）", "err", err)
-	}
 	o.procHandle = handle
 	o.job = job
 	o.port = port

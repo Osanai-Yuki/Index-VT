@@ -25,8 +25,19 @@ var (
 const ctrlBreakEvent = 1
 
 // ctrlBreakArmed 确保主进程对自身收到的控制台事件免疫。
-// GUI 进程本无控制台，但 AttachConsole 后广播的 CTRL_BREAK 会回到本进程：
-// Go runtime 将 CTRL_BREAK 映射为 SIGTERM，注册 Notify 后默认终止行为被接管。
+// GUI 进程本无控制台，但 SendCtrlBreak 的 AttachConsole(pid) 会让本进程临时加入
+// 子进程的控制台，随后 GenerateConsoleCtrlEvent(CTRL_BREAK, 0) 的广播也会命中
+// 本进程：Go runtime 将 CTRL_BREAK 映射为 SIGTERM，不接管则默认行为是进程直接
+// 退出——停止流程会把自身杀掉。
+//
+// 决策（B24 Step 3）：保留"全局注册"而非改为按调用 Notify/Reset，这是故意的：
+//   - AttachConsole 受进程级"单控制台"约束，两次并发 SendCtrlBreak 时后者 attach
+//     失败，但其 defer Reset 若执行会撤掉前者窗口内仍需的免疫 → 广播自杀；
+//   - signal.Reset 是进程级的，会一并清掉其他组件注册的 handler。
+//
+// 代价（明确接受）：整个生命周期内 SIGINT/SIGTERM 不再终止本进程。GUI 生命周期由
+// 窗口关闭/PrepareExit 管理，taskkill /F 不受影响。channel 有缓冲且无人读取，
+// 信号在此被有目的地吞掉，不是遗漏。
 var ctrlBreakArmed = func() bool {
 	ch := make(chan os.Signal, 4)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
