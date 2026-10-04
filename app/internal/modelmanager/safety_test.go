@@ -3,11 +3,13 @@ package modelmanager
 import (
 	"errors"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"indexvt/internal/paths"
 	"indexvt/internal/store"
 )
 
@@ -206,5 +208,107 @@ func TestVerifyIntegrityUnavailableClassified(t *testing.T) {
 	}
 	if errors.Is(errMismatch, ErrChecksumUnavailable) {
 		t.Errorf("校验不一致不得匹配 ErrChecksumUnavailable: %v", errMismatch)
+	}
+}
+
+// ---------- Task 1.6：路径安全（B16 Delete 误删目录 / B17 AssignUnknown 任意文件移动） ----------
+
+// newManagerWithModelsDir：用 INDEXVT_ROOT 把 models/ 隔离到临时目录
+func newManagerWithModelsDir(t *testing.T) (*Manager, string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("INDEXVT_ROOT", root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(root, "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return New(st, &stubOrchView{}, nil, nil, nil, nil), paths.ModelsDir()
+}
+
+func TestDeleteUnknownQuantKeepsModelsDir(t *testing.T) {
+	m, modelsDir := newManagerWithModelsDir(t)
+	if err := m.Delete(ModelID("translate"), QuantKind("NOPE")); err == nil {
+		t.Fatal("未知档位应报错")
+	}
+	if _, err := os.Stat(modelsDir); err != nil {
+		t.Fatalf("models 目录被误删: %v", err)
+	}
+}
+
+func TestAssignUnknownRejectsPathOutsideModels(t *testing.T) {
+	m, _ := newManagerWithModelsDir(t)
+	outside := filepath.Join(t.TempDir(), "hosts")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AssignUnknown(outside, ModelID("translate"), QuantKind("Q4_K_M")); err == nil {
+		t.Fatal("models/ 外的路径必须被拒绝（否则就是任意文件移动原语）")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("文件被移走了: %v", err)
+	}
+}
+
+// TestDeleteUnknownQuantOnEmptyModelsDirKeepsIt：上面 brief 版用例走过 EnsureDirs，
+// models/ 内已有 data/ 子目录（DataDir()==ModelsDir()/data），os.Remove(目录) 会因
+// 「目录非空」顺带报错 —— 那是「侥幸安全」。本用例只建一个空的 models/，直接暴露
+// 缺陷本体：档位未命中 → Join 出目录本身 → 空目录被 os.Remove 真删且返回 nil。
+func TestDeleteUnknownQuantOnEmptyModelsDirKeepsIt(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("INDEXVT_ROOT", root)
+	if err := os.MkdirAll(paths.ModelsDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(root, "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	m := New(st, &stubOrchView{}, nil, nil, nil, nil)
+
+	if err := m.Delete(ModelTranslate, QuantKind("NOPE")); err == nil {
+		t.Error("未知档位必须报错（修复前：空 models/ 被静默删除且返回 nil）")
+	}
+	if _, err := os.Stat(paths.ModelsDir()); err != nil {
+		t.Fatalf("models 目录被误删: %v", err)
+	}
+}
+
+// TestAssignUnknownDoesNotMoveGGUFOutsideModels：喂给 AssignUnknown 一个能通过
+// ReadGGUFMeta 但位于 models/ 之外的 GGUF —— 修复前它会先解析头、再 os.Rename
+// 把文件搬进 models/（任意文件移动原语，源文件被毁）；修复后必须在归拢检查处
+// 拒绝，且源文件原地不动。
+func TestAssignUnknownDoesNotMoveGGUFOutsideModels(t *testing.T) {
+	m, _ := newManagerWithModelsDir(t)
+	outside := filepath.Join(t.TempDir(), "evil.gguf")
+	if err := os.WriteFile(outside, buildTestGGUF(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.AssignUnknown(outside, ModelTranslate, QuantQ4KM); err == nil {
+		t.Error("models/ 外的 GGUF 必须被拒绝（否则任意文件可被搬进 models/）")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Errorf("源文件被移走: %v", err)
+	}
+}
+
+// TestAssignUnknownAcceptsGGUFInsideModels 正对照：归拢校验不得误伤合法路径 ——
+// models/ 内、以注册表目标文件名命名的 GGUF 仍可指派成功。
+func TestAssignUnknownAcceptsGGUFInsideModels(t *testing.T) {
+	m, modelsDir := newManagerWithModelsDir(t)
+	inside := filepath.Join(modelsDir, "Index-Translate-2B.Q4_K_M.gguf")
+	if err := os.WriteFile(inside, buildTestGGUF(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mi, err := m.AssignUnknown(inside, ModelTranslate, QuantQ4KM)
+	if err != nil {
+		t.Fatalf("models/ 内合法 GGUF 被误拒: %v", err)
+	}
+	if mi.ID != string(ModelTranslate) {
+		t.Fatalf("指派结果 ID = %q", mi.ID)
 	}
 }

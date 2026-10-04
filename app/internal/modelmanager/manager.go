@@ -465,7 +465,16 @@ func (m *Manager) registerExisting(path string, id ModelID, quant QuantKind) (Mo
 
 // AssignUnknown 将 models/ 中的未知文件手动指派为某模型档位（02 文档 §4 现象 B）。
 func (m *Manager) AssignUnknown(path string, id ModelID, quant QuantKind) (ModelInfo, error) {
-	meta, err := ReadGGUFMeta(path)
+	// B17：path 完全来自前端，必须先归拢在 models/ 内且是 .gguf，
+	// 否则 os.Rename 就是任意文件移动原语。
+	abs, err := paths.Contains(paths.ModelsDir(), path)
+	if err != nil {
+		return ModelInfo{}, err
+	}
+	if err := paths.ValidateGGUFName(filepath.Base(abs)); err != nil {
+		return ModelInfo{}, err
+	}
+	meta, err := ReadGGUFMeta(abs)
 	if err != nil {
 		return ModelInfo{}, fmt.Errorf("GGUF 头解析失败: %w", err)
 	}
@@ -474,9 +483,16 @@ func (m *Manager) AssignUnknown(path string, id ModelID, quant QuantKind) (Model
 	if !ok {
 		return ModelInfo{}, fmt.Errorf("未知模型 %s", id)
 	}
-	dst := filepath.Join(paths.ModelsDir(), spec.Files[quant])
-	if !strings.EqualFold(path, dst) {
-		if err := os.Rename(path, dst); err != nil {
+	name, ok := spec.Files[quant]
+	if !ok || name == "" {
+		return ModelInfo{}, fmt.Errorf("模型 %s 不支持量化档位 %s", id, quant)
+	}
+	dst, err := paths.Contains(paths.ModelsDir(), filepath.Join(paths.ModelsDir(), name))
+	if err != nil {
+		return ModelInfo{}, err
+	}
+	if !strings.EqualFold(abs, dst) {
+		if err := os.Rename(abs, dst); err != nil {
 			return ModelInfo{}, err
 		}
 	}
@@ -489,10 +505,20 @@ func (m *Manager) Delete(id ModelID, quant QuantKind) error {
 	if !ok {
 		return fmt.Errorf("未知模型 %s", id)
 	}
+	name, ok := spec.Files[quant]
+	if !ok || name == "" { // B16：档位未命中直接拒绝，绝不 Join 出目录本身
+		return fmt.Errorf("模型 %s 不支持量化档位 %s", id, quant)
+	}
+	if err := paths.ValidateGGUFName(name); err != nil {
+		return err
+	}
 	if m.orch.CurrentModel() == string(id) && m.orch.State() == "running" {
 		return fmt.Errorf("模型运行中，无法删除；请先切换模型或等待空闲释放")
 	}
-	target := filepath.Join(paths.ModelsDir(), spec.Files[quant])
+	target, err := paths.Contains(paths.ModelsDir(), filepath.Join(paths.ModelsDir(), name))
+	if err != nil {
+		return err
+	}
 	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
 		return err
 	}

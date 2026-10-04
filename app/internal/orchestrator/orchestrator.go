@@ -399,7 +399,10 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 		o.setState(StateCrashed, "no-port")
 		return fmt.Errorf("端口池 8101-8110 全部被占用: %w", err)
 	}
-	args, nglUsed := o.buildArgs(modelPath, port)
+	args, nglUsed, err := o.buildArgs(modelPath, port)
+	if err != nil {
+		return err
+	}
 	exe := paths.LlamaServerPath()
 	if _, err := os.Stat(modelPath); err != nil {
 		return fmt.Errorf("模型文件不存在: %w", err)

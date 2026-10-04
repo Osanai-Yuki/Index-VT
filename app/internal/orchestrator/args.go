@@ -1,19 +1,23 @@
 package orchestrator
 
 import (
-	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
-	"strings"
 
 	"indexvt/internal/envprobe"
+	"indexvt/internal/paths"
 )
 
 // buildArgs 合成 llama-server 启动参数（01 文档 §5.1 + 02 文档 §2 降级）。
 //
 // llama.cpp b11384 语法注意：-fa 需要显式值（on|off|auto），非布尔开关；
 // --parallel 1 固定单 slot（02 文档 §11.4：多 slot 会均分 KV 且 2B 吞吐无收益）。
-func (o *Orchestrator) buildArgs(modelPath string, port int) ([]string, int) {
+func (o *Orchestrator) buildArgs(modelPath string, port int) ([]string, int, error) {
+	// 模型路径进入 argv 前的最后一道关（防误传可执行文件等）
+	if err := sanitizeGGUFPath(modelPath); err != nil {
+		return nil, 0, err
+	}
 	args := []string{
 		"-m", modelPath,
 		"--host", "127.0.0.1",
@@ -28,7 +32,7 @@ func (o *Orchestrator) buildArgs(modelPath string, port int) ([]string, int) {
 	if t := o.set.CPUThreads(); t > 0 {
 		args = append(args, "-t", strconv.Itoa(t))
 	}
-	return args, ngl
+	return args, ngl, nil
 }
 
 // resolveNGL 决定 GPU 卸载层数：
@@ -55,10 +59,7 @@ func (o *Orchestrator) resolveNGL(modelPath string) int {
 	return 0
 }
 
-// sanitizeGGUFPath 二次校验模型路径扩展名（防误传可执行文件等）。
+// sanitizeGGUFPath 委托给 paths 包，避免与模型管理侧的两套校验漂移（B17）。
 func sanitizeGGUFPath(p string) error {
-	if !strings.HasSuffix(strings.ToLower(p), ".gguf") {
-		return fmt.Errorf("仅支持 .gguf 模型文件: %q", p)
-	}
-	return nil
+	return paths.ValidateGGUFName(filepath.Base(p))
 }
