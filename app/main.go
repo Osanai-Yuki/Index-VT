@@ -91,6 +91,9 @@ func main() {
 		Height:    800,
 		MinWidth:  1180,
 		MinHeight: 700,
+		// 与 DESIGN.md §9 浅色 --canvas (#FBFBFA) 一致：WebView2 首帧前默认白底，
+		// 深色主题下会先白后黑闪一下（B30）；预置设计基准底色消除该闪变。
+		BackgroundColour: &options.RGBA{R: 251, G: 251, B: 250, A: 255},
 		AssetServer: &assetserver.Options{
 			Handler: http.FileServer(http.FS(assets())),
 		},
@@ -99,6 +102,15 @@ func main() {
 				slog.Error("startup failed", "err", err)
 				os.Exit(1)
 			}
+		},
+		// 点 X 关窗只触发 OnBeforeClose/OnShutdown，不走前端 PrepareExit→Quit；
+		// 在此补上推理进程释放，否则 llama-server 成孤儿常驻显存。
+		// prepare 失败也放行关闭 —— 不得把用户困在关不掉的窗口里。
+		OnBeforeClose: func(ctx context.Context) (prevent bool) {
+			if err := app.PrepareExit(); err != nil {
+				slog.Error("OnBeforeClose 中 PrepareExit 失败", "err", err)
+			}
+			return false
 		},
 		OnShutdown: func(ctx context.Context) {
 			app.shutdown()

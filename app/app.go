@@ -623,9 +623,10 @@ func (a *App) GetSystemStatus() (*SystemStatus, error) {
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
-	// 5s TTL 缓存：本接口被前端按周期轮询，未经缓存的 QueryVRAM 会每轮 spawn
-	// 一个 nvidia-smi 进程（B25）。Probe() 一次性路径仍直调 QueryVRAM。
-	gpu, _ := envprobe.QueryVRAMCached(5 * time.Second)
+	// 15s TTL = 前端轮询周期（5000ms）的 3 倍：TTL 与轮询同频（原 5s）时几乎每次
+	// 请求都落在缓存过期点上，每轮仍 spawn 一个 nvidia-smi，1.15 的缓存形同虚设（B25）；
+	// 显存是粗粒度指标，容忍一两个周期的滞后。Probe() 一次性路径仍直调 QueryVRAM。
+	gpu, _ := envprobe.QueryVRAMCached(15 * time.Second)
 	models := a.models.List()
 	c := a.cfgSnapshot()
 	return &SystemStatus{
@@ -826,26 +827,43 @@ func (a *App) CollectLogs() (string, error) {
 }
 
 // PrepareExit 退出释放编排（01 文档 §7.1 应用组）。
-// 返回释放摘要；前端随后调用 Quit()。
+// 前端在 Quit() 前调用；点 X 关窗路径由 main.go 的 OnBeforeClose 调用。
+// 返回契约不变：非 nil 错误意为"释放失败"，前端仍会继续退出。
+// 幂等：closing 置位后重复调用直接返回 nil。
+// nil 防护：装配（OnStartup）完成前 a.log/a.orch 尚为 nil，此时也必须能走完并放行关闭。
 func (a *App) PrepareExit() error {
+	log := a.log
+	if log == nil {
+		log = slog.Default() // 装配尚未完成时也要能记录退出意图
+	}
 	a.mu.Lock()
 	if a.closing {
 		a.mu.Unlock()
 		return nil
 	}
 	a.closing = true
+	orch := a.orch
 	a.mu.Unlock()
-	a.log.Info("prepare exit: releasing resources")
-	if err := a.orch.PrepareExit(); err != nil {
-		a.log.Error("prepare exit failed", "err", err)
+
+	if orch == nil {
+		return nil // 编排器还没起来，无可释放
+	}
+	log.Info("prepare exit: releasing resources")
+	if err := orch.PrepareExit(); err != nil {
+		log.Error("prepare exit failed", "err", err)
 		return err
 	}
-	a.log.Info("prepare exit done")
+	log.Info("prepare exit done")
 	return nil
 }
 
 // Quit 退出程序。
 func (a *App) Quit() {
+	// OnStartup 前 a.ctx == nil：v2.16.0 的 runtime.Quit 对 nil ctx 走
+	// log.Fatalf 直接杀进程（runtime.go:64），此时静默返回即可 —— 尚无窗口，无需退出序列。
+	if a.ctx == nil {
+		return
+	}
 	runtime.Quit(a.ctx)
 }
 
