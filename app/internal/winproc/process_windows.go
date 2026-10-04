@@ -77,12 +77,35 @@ func CommandLine(pid uint32) (string, error) {
 	if st != uintptr(statusSuccess) {
 		return "", fmt.Errorf("NtQueryInformationProcess: ntstatus=0x%x", st)
 	}
-	// 返回结构：UNICODE_STRING { USHORT Length; USHORT MaximumLength; USHORT pad; ULONG pad; ULONG64 Buffer; } 后随 WCHAR[]
+	return parseCommandLine(buf)
+}
+
+// parseCommandLine 解析 NtQueryInformationProcess(ProcessCommandLineInformation)
+// 返回的缓冲区：
+//
+//	UNICODE_STRING { USHORT Length; USHORT MaximumLength; USHORT pad; ULONG pad; ULONG64 Buffer; }
+//	后随 WCHAR[]。
+//
+// 独立成函数以便对畸形返回（缓冲区 < 头大小）做不依赖 syscall 的单测（B24）。
+func parseCommandLine(buf []byte) (string, error) {
 	const usLenOff = 0
-	usLen := *(*uint16)(unsafe.Pointer(&buf[usLenOff]))
 	const dataOff = 16 // UNICODE_STRING 头大小（x64 对齐后）
+	// 必须早于任何 &buf[dataOff]：缓冲区不足时 len(buf)-dataOff 为负，
+	// uint16 回绕会让下面的 clamp 变成"无需 clamp"，然后索引越界 panic。
+	if len(buf) < dataOff {
+		return "", fmt.Errorf("NtQueryInformationProcess: 返回 %d 字节，不足以容纳 UNICODE_STRING 头", len(buf))
+	}
+	usLen := *(*uint16)(unsafe.Pointer(&buf[usLenOff]))
 	if int(usLen) > len(buf)-dataOff {
 		usLen = uint16(len(buf) - dataOff)
+	}
+	if int(usLen)%2 != 0 { // WCHAR 数组必须偶数字节
+		usLen--
+	}
+	if usLen == 0 {
+		// len(buf) == dataOff 时 &buf[dataOff] 本身就会索引越界（Go 切片不允许
+		// one-past-end 下标，即便随后取长度为 0 的切片），必须先分支跳过。
+		return "", nil
 	}
 	u16 := unsafe.Slice((*uint16)(unsafe.Pointer(&buf[dataOff])), int(usLen)/2)
 	return windows.UTF16ToString(u16), nil
@@ -116,6 +139,11 @@ func ListenerPortsByPID() (map[uint32]uint16, error) {
 // 结构（x64）：DWORD numEntries; MIB_TCPTABLE_OWNER_PID{ DWORD state; DWORD localAddr; DWORD localPort (network order high byte*256+low); ... }[]
 // MIB_TCPROW_OWNER_PID = {dwState, dwLocalAddr, dwLocalPort, dwRemoteAddr, dwRemotePort, dwOwningPid} — 6×4 字节。
 func parseTcpOwnerListenerTable(buf []byte, out map[uint32]uint16) {
+	// 同类前置校验（B24）：下面立即读取 4 字节条目数，缓冲区不足以容纳时直接放弃，
+	// 与 CommandLine 一样不允许越界读。
+	if len(buf) < 4 {
+		return
+	}
 	n := *(*uint32)(unsafe.Pointer(&buf[0]))
 	rowSize := 24
 	base := 4

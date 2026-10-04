@@ -52,10 +52,26 @@ func SendCtrlBreak(pid uint32) error {
 	return nil
 }
 
+// infiniteWait 是 WaitForSingleObject 的 INFINITE（B24）。
+// 旧写法把"无限"表达成 time.Duration（1<<31-1 ns）再经 uint32(Milliseconds())
+// 截断 → 2147ms，看护协程每 2.1s 空转一次。
+const infiniteWait = uint32(0xFFFFFFFF)
+
 // WaitForExit 等待进程句柄 signaled 或超时。
 func WaitForExit(handle windows.Handle, timeout time.Duration) bool {
+	return waitHandleMs(handle, uint32(timeout.Milliseconds()))
+}
+
+// WaitForExitInfinite 真 INFINITE：阻塞到句柄 signaled 或句柄失效（WAIT_FAILED）。
+// 调用方必须保证句柄生命周期不短于本次等待——见 orchestrator 的
+// watcherDone/pendingHandle 同步（B24）。
+func WaitForExitInfinite(handle windows.Handle) bool {
+	return waitHandleMs(handle, infiniteWait)
+}
+
+func waitHandleMs(handle windows.Handle, ms uint32) bool {
 	const waitObject0 = 0
-	ev, _ := windows.WaitForSingleObject(handle, uint32(timeout.Milliseconds()))
+	ev, _ := windows.WaitForSingleObject(handle, ms)
 	return ev == waitObject0
 }
 

@@ -85,10 +85,19 @@ type Orchestrator struct {
 	procHandle winHandle
 	job        winHandle
 	exited     chan struct{}
-	endpoint   Endpoint
-	modelPath  string
-	modelID    string
-	port       int
+	// watcherDone 由进程看护协程在退出路径末尾关闭（B24）。cleanupProcLocked
+	// 必须确认 watcher 已退出才可 CloseHandle(procHandle)——它可能正阻塞在
+	// WaitForSingleObject(procHandle) 上：提前关闭会让等待以 WAIT_FAILED 立即
+	// 返回，更糟的是句柄值被系统复用后 watcher 会等在新进程的句柄上。
+	watcherDone chan struct{}
+	// pendingHandle：cleanupProcLocked 在 500ms 内等不到 watcherDone 时，把
+	// procHandle 所有权移交 watcher，由其退出路径关闭。用 atomic 而非 opMu：
+	// cleanup 持 opMu 等待 watcherDone，watcher 若需要 opMu 才能收尾就会死锁。
+	pendingHandle atomic.Uintptr
+	endpoint      Endpoint
+	modelPath     string
+	modelID       string
+	port          int
 
 	quit      chan struct{}
 	closeOnce sync.Once
@@ -321,9 +330,35 @@ func (o *Orchestrator) cleanupProcLocked() {
 		o.job = 0
 	}
 	if o.procHandle != 0 {
-		windowsCloseHandle(o.procHandle)
-		o.procHandle = 0
+		// 只有 watcher 退出后才允许 CloseHandle：它可能正阻塞在
+		// WaitForSingleObject(procHandle) 上，关句柄会让等待立即以 WAIT_FAILED
+		// 返回、或更糟地句柄值被复用（B24）。
+		if done := o.watcherDone; done != nil {
+			select {
+			case <-done:
+			case <-time.After(500 * time.Millisecond):
+				o.log.Warn("watcher 未在 500ms 内退出，把 handle 移交 watcher 自行关闭")
+				o.pendingHandle.Store(uintptr(o.procHandle))
+				o.procHandle = 0
+				// 二次确认：watcher 可能恰在超时边界完成了尾部（先消费
+				// pendingHandle 再关 done，且其"补消费"发生在 close(done) 之后）。
+				// 观察到 done 关闭后若值仍在，说明直到 watcher 结束都无人消费，
+				// 由本处收尾关闭（Swap 与 watcher 的 CAS 互斥，不会双重关闭）。
+				select {
+				case <-done:
+					if h := o.pendingHandle.Swap(0); h != 0 {
+						windowsCloseHandle(winHandle(h))
+					}
+				default:
+				}
+			}
+		}
+		if o.procHandle != 0 {
+			windowsCloseHandle(o.procHandle)
+			o.procHandle = 0
+		}
 	}
+	o.watcherDone = nil
 	o.exited = nil
 	o.endpoint = Endpoint{}
 	o.port = 0
@@ -429,14 +464,18 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 	o.modelPath = modelPath
 	o.modelID = modelID
 	o.exited = make(chan struct{})
+	o.watcherDone = make(chan struct{})
 	o.emit(Event{Kind: "port", Extra: map[string]any{"port": port}})
 
 	exited := o.exited
+	watcherDone := o.watcherDone
 	go func() {
 		// 进程句柄等待；WAIT_FAILED（句柄异常）时轮询兜底，
 		// 只有确认终止才关闭 exited（防止误判崩溃触发重启风暴）。
+		// 使用真 INFINITE（B24）：旧常量 1<<31-1 被解释为 time.Duration(2.147s)，
+		// 看护协程每 2.1s 假醒一次。
 		for {
-			if winproc.WaitForExit(handle, watchInfinite) {
+			if winproc.WaitForExitInfinite(handle) {
 				break
 			}
 			// 未能确认：探活复核，仍存活则继续等
@@ -445,13 +484,26 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 				continue
 			}
 			time.Sleep(1 * time.Second)
-			if !winproc.WaitForExit(handle, 5*time.Second) && !winproc.WaitForExit(handle, watchInfinite) {
+			if !winproc.WaitForExit(handle, 5*time.Second) && !winproc.WaitForExitInfinite(handle) {
 				// 仍无法确认终止 → 以终止处理（句柄已不可信）
 				break
 			}
 			break
 		}
+		// watcher 退出路径（B24）：cleanup 若超时已把 handle 所有权移交
+		// （pendingHandle），必须由本协程关闭——它就是阻塞在该句柄上的等待者。
+		// CAS 同时校验"值仍是本句柄"，与清理侧 Swap 互斥，双重关闭不可能发生。
+		consumePending := func() {
+			if o.pendingHandle.CompareAndSwap(uintptr(handle), 0) {
+				windowsCloseHandle(handle)
+			}
+		}
+		consumePending()
 		close(exited)
+		close(watcherDone)
+		// 补一次：cleanup 的移交可能恰好落在上面 CAS 与 close(watcherDone) 之间
+		// （cleanup 观察到 done 未关 -> 移交 -> 本协程此刻已错过第一个 CAS）。
+		consumePending()
 	}()
 	o.setState(StateStarting, "spawn")
 
@@ -473,7 +525,9 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 	return nil
 }
 
-const watchInfinite = 1<<31 - 1 // WaitForSingleObject INFINITE（毫秒）
+// 注：原 watchInfinite = 1<<31-1 常量已删除（B24）。它作为无类型常量传入
+// winproc.WaitForExit(time.Duration) 后被解释为 2147483647ns ≈ 2.147s，
+// 而非 WaitForSingleObject 的 INFINITE。现在使用 winproc.WaitForExitInfinite。
 
 func llamaLogPath() string {
 	return filepath.Join(paths.LogsDir(), "llama-server.out.log")
