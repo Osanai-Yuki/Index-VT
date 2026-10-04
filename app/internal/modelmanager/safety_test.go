@@ -1,6 +1,8 @@
 package modelmanager
 
 import (
+	"errors"
+	"net/url"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -80,5 +82,105 @@ func TestListAndMarkRanDoNotDeadlock(t *testing.T) {
 	case <-finished:
 	case <-time.After(10 * time.Second):
 		t.Fatal("List × MarkRan 死锁（AB-BA：m.mu ↔ opMu）")
+	}
+}
+
+// ---------- Task 1.5：模型下载安全边界（B18） ----------
+
+// TestIsAllowedURLRejectsPlainHTTP B18③：仅允许 https —— 模型完整性不能靠明文
+// 传输兜底（http 可被中间人替换 GGUF，落盘后由 llama-server 解析执行）。
+func TestIsAllowedURLRejectsPlainHTTP(t *testing.T) {
+	bad, _ := url.Parse("http://huggingface.co/x/y.gguf")
+	if isAllowedURL(bad) {
+		t.Fatal("http:// 不应被允许（仅 https）")
+	}
+	good, _ := url.Parse("https://huggingface.co/x/y.gguf")
+	if !isAllowedURL(good) {
+		t.Fatal("https://huggingface.co 应被允许")
+	}
+	lan, _ := url.Parse("https://169.254.169.254/latest/meta-data")
+	if isAllowedURL(lan) {
+		t.Fatal("链路本地地址不应被允许")
+	}
+}
+
+// TestIsAllowedURLPrivateAndLoopbackLiterals 策略回归锁：IP 字面量形式的环回 /
+// 私网 / 链路本地 / 未指定地址（含 IPv6 与 v4-mapped 写法）一律拒绝；
+// 官方白名单主机（HF / hf.co / ModelScope / OSS）与 https scheme 不受影响。
+// 注意：多数私网 IP 断言在收紧前也会因后缀白名单而通过 —— 真正的 RED 来自
+// http:// 与私有地址策略这两处（见 http:// 与 169.254 全量用例）。
+func TestIsAllowedURLPrivateAndLoopbackLiterals(t *testing.T) {
+	reject := []string{
+		"http://huggingface.co/a/b.gguf", // 明文 scheme（B18③）
+		"http://modelscope.cn/a/b.gguf",  // 明文 scheme（B18③）
+		"https://127.0.0.1/a/b.gguf",
+		"https://127.1.2.3/a/b.gguf",
+		"https://[::1]/a/b.gguf",
+		"https://[::ffff:127.0.0.1]/a/b.gguf", // v4-mapped 环回
+		"https://0.0.0.0/a/b.gguf",
+		"https://10.0.0.5/a/b.gguf",
+		"https://172.16.0.1/a/b.gguf",
+		"https://172.31.255.254/a/b.gguf",
+		"https://192.168.1.1/a/b.gguf",
+		"https://169.254.169.254/a/b.gguf", // 云元数据端点
+		"https://[fe80::1]/a/b.gguf",       // 链路本地 IPv6
+		"https://[fd00::1]/a/b.gguf",       // 唯一本地地址（IsPrivate）
+		"https://localhost/a/b.gguf",
+		"ftp://huggingface.co/a/b.gguf", // 其他 scheme
+	}
+	for _, raw := range reject {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse %s: %v", raw, err)
+		}
+		if isAllowedURL(u) {
+			t.Errorf("应拒绝 %s", raw)
+		}
+	}
+	allow := []string{
+		"https://huggingface.co/a/b.gguf",
+		"https://cdn-lfs.huggingface.co/a/b.gguf",
+		"https://hf.co/a/b.gguf",
+		"https://modelscope.cn/models/a/b.gguf",
+		"https://modelscope.org/a/b.gguf",
+		"https://oss.aliyuncs.com/a/b.gguf",
+	}
+	for _, raw := range allow {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse %s: %v", raw, err)
+		}
+		if !isAllowedURL(u) {
+			t.Errorf("应允许 %s", raw)
+		}
+	}
+}
+
+// TestVerifyIntegrityFailClosed 官方校验和不可用 / 缺条目 / 不一致 → 全部拒绝；
+// 一致（大小写不敏感）→ 放行（B18①：原实现 offErr != nil 时仅 log.Warn 后照常落盘，
+// 即 fail-open）。
+func TestVerifyIntegrityFailClosed(t *testing.T) {
+	if err := verifyIntegrity("", errors.New("SHA256SUMS 不可达"), "aaaa"); err == nil {
+		t.Fatal("官方校验和取不到时应拒绝，不得放行未校验文件")
+	}
+	if err := verifyIntegrity("", nil, "aaaa"); err == nil {
+		t.Fatal("SHA256SUMS 缺该条目时应拒绝")
+	}
+	if err := verifyIntegrity("bbbb", nil, "aaaa"); err == nil {
+		t.Fatal("校验不一致必须拒绝")
+	}
+	if err := verifyIntegrity("AAAA", nil, "aaaa"); err != nil {
+		t.Fatalf("校验一致却失败: %v", err)
+	}
+}
+
+// TestMaxDownloadBytesCeilingConstant 数值漂移护栏：上限必须锁定为 4GiB
+// （覆盖三模型最大档位，且远低于 int64 溢出阈值）。熔断行为本身无法在本环境
+// 端到端触发（需要真实可达的 >4GiB 供体；下载目标 URL 由 sourceURLs 固定为
+// 官方域名，本地 httptest 服务器会被私网拒绝策略挡掉），故此处只锁常量取值，
+// 不冒充行为覆盖。
+func TestMaxDownloadBytesCeilingConstant(t *testing.T) {
+	if maxDownloadBytes != 4<<30 {
+		t.Fatalf("maxDownloadBytes = %d，期望 4GiB(4<<30)", maxDownloadBytes)
 	}
 }

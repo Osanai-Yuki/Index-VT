@@ -60,11 +60,22 @@ var allowedHostSuffixes = []string{
 }
 
 func isAllowedURL(u *url.URL) bool {
-	if u.Scheme != "https" && u.Scheme != "http" {
+	// B18③：仅 https。明文 http 可被中间人整体替换 GGUF，而落盘文件随后
+	// 由 llama-server 解析执行 —— 完整性不能靠明文传输兜底。
+	if u.Scheme != "https" {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+	// IP 字面量：拒绝环回 / 私网 / 链路本地 / 未指定（含云元数据端点
+	// 169.254.169.254）。用 net.ParseIP + 标准谓词而非字符串前缀，
+	// 可覆盖 IPv6、v4-mapped 及其他等价写法。
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return false
+		}
+	}
+	if host == "localhost" {
 		return false
 	}
 	for _, s := range allowedHostSuffixes {
@@ -242,6 +253,10 @@ func partPaths(final string) (string, string) {
 
 // ---------- 下载器 ----------
 
+// maxDownloadBytes 无 Content-Length 时的熔断上限（4GB，覆盖三模型最大档位）。
+// 修 B18②：total==0 时旧代码的 `if total > 0 && done != total` 整个跳过体积检查。
+const maxDownloadBytes int64 = 4 << 30
+
 // startDownload 执行一次完整下载流程（供 Download/重试调用）。
 // ch 接收进度快照；emit 同时回调 app 层（Wails 事件广播）。
 func (m *Manager) startDownload(ctx context.Context, spec ModelSpec, quant QuantKind, ch chan<- DownloadProgress, emit func(DownloadProgress)) error {
@@ -367,6 +382,10 @@ func (m *Manager) startDownload(ctx context.Context, spec ModelSpec, quant Quant
 				return fail("写盘失败: " + werr.Error())
 			}
 			done += int64(n)
+			if done > maxDownloadBytes {
+				out.Close()
+				return fail(fmt.Sprintf("已下载 %d 字节超过上限 %d，连接已切断（.part 已保留）", done, maxDownloadBytes))
+			}
 			speedWindow.add(n)
 			if time.Since(lastEmit) >= 200*time.Millisecond {
 				lastEmit = time.Now()
@@ -400,13 +419,10 @@ func (m *Manager) startDownload(ctx context.Context, spec ModelSpec, quant Quant
 	if err != nil {
 		return fail("SHA256 计算失败: " + err.Error())
 	}
-	if offErr == nil && official != "" && official != got {
+	if verr := verifyIntegrity(official, offErr, got); verr != nil {
 		_ = os.Remove(partFile)
 		_ = os.Remove(metaFile)
-		return fail("SHA256 校验失败（与官方 SHA256SUMS 不符），已删除重试")
-	}
-	if offErr != nil {
-		m.log.Warn("官方 SHA256 获取失败，仅记录实测哈希", "err", offErr)
+		return fail(verr.Error())
 	}
 
 	// 6. 原子重命名 + 登记
@@ -463,6 +479,23 @@ func fetchOfficialSHA256(ctx context.Context, repo, file string, kind SourceKind
 		}
 	}
 	return "", fmt.Errorf("SHA256SUMS 中未找到 %s", file)
+}
+
+// verifyIntegrity 判定下载完整性。fail-closed：拿不到官方校验和即拒绝。
+// 理由：落盘文件随后会被 llama-server 解析执行，恶意/损坏 GGUF 经张量解析
+// 即构成以用户权限执行代码的路径。缺失校验和时指向既有的「从本地导入」路径，
+// 本版不提供 allowUnverified 风险放行开关（属新增能力，PRD R-7 决定不做）。
+func verifyIntegrity(official string, officialErr error, got string) error {
+	if officialErr != nil {
+		return fmt.Errorf("无法获取官方 SHA256SUMS，拒绝安装未校验模型；可先把文件放入 models/ 再用「从本地导入」: %w", officialErr)
+	}
+	if official == "" {
+		return fmt.Errorf("官方 SHA256SUMS 缺少该文件条目，拒绝安装未校验模型")
+	}
+	if !strings.EqualFold(official, got) {
+		return fmt.Errorf("SHA256 校验失败：期望 %s，实际 %s", official, got)
+	}
+	return nil
 }
 
 func sha256File(path string) (string, error) {
