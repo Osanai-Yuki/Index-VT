@@ -23,3 +23,6 @@ logs/
 .mimosa/
 .archcore/
 .trae/
+
+# SDD 工作区（git-ignored scratch）
+.superpowers/
