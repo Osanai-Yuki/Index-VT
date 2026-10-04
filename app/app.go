@@ -17,6 +17,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"indexvt/internal/config"
+	"indexvt/internal/csvsanitizer"
 	"indexvt/internal/envprobe"
 	"indexvt/internal/modelmanager"
 	"indexvt/internal/orchestrator"
@@ -407,9 +408,7 @@ func (a *App) ExportGlossaryCSV(id int64) (string, error) {
 			var b strings.Builder
 			b.WriteString("term,translation\n")
 			for _, it := range g.Items {
-				t := strings.ReplaceAll(it.Term, `"`, `""`)
-				tr := strings.ReplaceAll(it.Translation, `"`, `""`)
-				b.WriteString(fmt.Sprintf(`"%s","%s"`+"\n", t, tr))
+				b.WriteString(csvsanitizer.Quote(it.Term) + "," + csvsanitizer.Quote(it.Translation) + "\n")
 			}
 			return b.String(), nil
 		}
