@@ -254,14 +254,19 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 
 func (a *App) shutdown() {
 	a.mu.Lock()
-	if a.closing {
-		a.mu.Unlock()
-		return
-	}
+	already := a.closing // PrepareExit 绑定已先置位时（前端 Ctrl+Q / 点 X 的 OnBeforeClose）不再重复释放编排
 	a.closing = true
+	orch, st := a.orch, a.store
 	a.mu.Unlock()
-	_ = a.orch.PrepareExit() // 兜底全量释放（正常路径走 PrepareExit 绑定）
-	_ = a.store.Close()
+
+	if !already && orch != nil {
+		_ = orch.PrepareExit() // 兜底全量释放（正常路径走 PrepareExit 绑定）
+	}
+	// 必须无条件执行：PrepareExit 绑定（前端 Ctrl+Q 与点 X 的 OnBeforeClose）会先置 closing，
+	// 若这里因 closing 提前返回，SQLite 句柄在两条退出路径上都不会被关闭，WAL 也不会 checkpoint。
+	if st != nil {
+		_ = st.Close() // 幂等：database/sql.DB.Close 对重复调用返回 nil（stdlib 显式保证）
+	}
 }
 
 // sourcePref 读取配置的下载源偏好。经 cfgSnapshot 取一致快照；
