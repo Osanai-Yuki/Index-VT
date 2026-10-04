@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "verify:theme": "node scripts/verify-theme.mjs"
+    "lint:design": "node scripts/lint-design-tokens.mjs",
+    "verify:theme": "node scripts/verify-theme.mjs",
+    "verify:a11y": "node scripts/verify-a11y.mjs",
+    "verify:wails": "node scripts/verify-wails.mjs",
+    "build": "npm run lint:design && tsc --noEmit && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "lucide-react": "^0.475.0",
@@ -16,10 +19,12 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@tailwindcss/vite": "^4.1.4",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.4.1",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4.1.4",
     "typescript": "^5.7.3",
     "vite": "^6.2.4"

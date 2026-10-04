@@ -11,7 +11,6 @@ import {
   apiListHistory,
   apiSearchHistory,
   apiDeleteHistory,
-  apiStarHistory,
   eventsOn,
 } from '../wailsapi'
 
@@ -220,6 +219,8 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
                         {h.sourceLang === 'auto' ? 'auto' : h.sourceLang} → {h.targetLang}
                       </span>
                       <span>{new Date(h.createdAt * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                      {/* TODO(TrackC): 收藏动作缺失——apiStarHistory 绑定已存在但从未接线，
+                          此处仅展示 h.starred。接收藏按钮时重新导入 apiStarHistory（PRD S2）。 */}
                       {h.starred && <Star size={10} className="text-accent" />}
                       <span
                         className="ml-auto hover:text-danger"

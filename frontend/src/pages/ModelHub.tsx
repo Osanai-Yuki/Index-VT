@@ -1,7 +1,7 @@
 // 模型中心（01 文档 §6.4 / mockups 屏 4）：三模型卡片七态、下载/取消/导入/删除、
 // 双源择优徽标、VRAM 仪表、空闲释放倒计时、保持加载。
 import { useCallback, useEffect, useState } from 'react'
-import { FolderOpen, Upload, Trash2, Pause, X } from 'lucide-react'
+import { FolderOpen, Trash2, Pause, X } from 'lucide-react'
 import { Chip, Btn, Seg, Progress } from '../components/ui'
 import { useAppStore } from '../stores/appStore'
 import {

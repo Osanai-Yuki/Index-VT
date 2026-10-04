@@ -83,7 +83,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, models, trial.state])
 
-  const translateReady = models.find((m) => m.id === 'translate')?.quants?.some((q: any) => q.present)
   const dlPct = dl?.bytesTotal > 0 ? Math.round((dl.bytesDone / dl.bytesTotal) * 100) : 0
 
   return (

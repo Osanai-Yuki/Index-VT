@@ -57,7 +57,6 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
   const [targetLang, setTargetLang] = useState('en')
   const [bilingual, setBilingual] = useState('双语双行')
   const [exportFmt, setExportFmt] = useState('SRT')
-  const [progress, setProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 })
   const [queueMsg, setQueueMsg] = useState<string | null>(null)
   const [selIdx, setSelIdx] = useState<number | null>(null)
 
@@ -65,7 +64,6 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
 
   useEffect(() => {
     const off = eventsOn('subtitle:cue', (p: any) => {
-      setProgress({ done: p.done, total: p.total })
       setDoc((d) =>
         d
           ? {
@@ -88,7 +86,6 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
       if (d) {
         setDoc(d)
         setSelIdx(null)
-        setProgress({ done: 0, total: 0 })
         setQueueMsg(null)
       }
     } catch (e) {
