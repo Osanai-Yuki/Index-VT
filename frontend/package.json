@@ -10,6 +10,7 @@
     "verify:a11y": "node scripts/verify-a11y.mjs",
     "verify:wails": "node scripts/verify-wails.mjs",
     "verify:lib": "node scripts/verify-lib.mjs",
+    "verify:datatable": "node scripts/verify-datatable.mjs",
     "build": "npm run lint:design && tsc --noEmit && vite build",
     "preview": "vite preview"
   },

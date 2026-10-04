@@ -5,12 +5,13 @@
 // 由 :focus-visible 自然呈现）——它是 axe（verify-a11y）的靶子，
 // 也是 2.10 对比度/键盘/reduced-motion 实测的唯一页面。
 // 每节 <section aria-labelledby> + 标题；交互组件一律受控。
-import { useState } from 'react'
-import { FileText, Inbox, Pause, Play, Settings, Trash2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { FileText, Inbox, Pause, Pencil, Play, Settings, Trash2 } from 'lucide-react'
 import {
   Badge,
   Button,
   Checkbox,
+  DataTable,
   Drawer,
   EmptyState,
   Field,
@@ -32,8 +33,18 @@ import {
   ToastHost,
   Tooltip,
   useToastStore,
+  type Column,
   type Lang,
 } from '../components/ui/index'
+
+interface DemoRow {
+  id: number
+  index: number
+  tc: string
+  source: string
+  target: string
+  state: 'done' | 'pending' | 'failed'
+}
 // 注意：并存期旧 src/components/ui.tsx 会遮蔽 '../components/ui' 短路径（文件优先于目录），
 // 故显式导入 ui/index；Track C 删除旧 ui.tsx 后可改回短路径。
 
@@ -74,6 +85,43 @@ export default function PrimitivesPage() {
   const [confirmModal, setConfirmModal] = useState(false)
   const [drawer, setDrawer] = useState(false)
   const toasts = useToastStore((s) => s.toasts)
+  const [sel, setSel] = useState<Set<string | number>>(new Set())
+
+  const bigRows: DemoRow[] = useMemo(
+    () =>
+      Array.from({ length: 5000 }, (_, i) => ({
+        id: i,
+        index: i,
+        tc: `${String(Math.floor(i / 600)).padStart(2, '0')}:${String(Math.floor((i % 600) / 10)).padStart(2, '0')}:${(i % 10) * 10}`,
+        source: `源文第 ${i + 1} 行——用于验证虚拟化在千行级数据下的表现`,
+        target: i % 3 === 0 ? `译文第 ${i + 1} 行` : '',
+        state: i % 17 === 0 ? 'failed' : i % 3 === 0 ? 'done' : 'pending',
+      })),
+    [],
+  )
+  const smallRows = bigRows.slice(0, 12)
+
+  const demoColumns: Column<DemoRow>[] = [
+    { key: 'index', header: '#', width: '56px', numeric: true, render: (r) => r.index + 1 },
+    { key: 'tc', header: '时间码', width: '110px', numeric: true, render: (r) => r.tc },
+    { key: 'source', header: '原文', render: (r) => r.source },
+    { key: 'state', header: '状态', width: '110px', render: (r) => (
+      <Badge tone={r.state === 'done' ? 'ok' : r.state === 'failed' ? 'danger' : 'neutral'} dot>
+        {r.state === 'done' ? '完成' : r.state === 'failed' ? '失败' : '待翻译'}
+      </Badge>
+    ) },
+    {
+      key: 'actions',
+      header: '操作',
+      width: '72px',
+      render: (r) => (
+        <span className="flex items-center justify-end gap-1 opacity-0 transition-opacity duration-(--suj-dur-quick) group-hover:opacity-100 group-focus-within:opacity-100">
+          <IconButton label={`编辑第 ${r.index + 1} 行`} icon={<Pencil size={14} />} size="sm" />
+          <IconButton label={`重试第 ${r.index + 1} 行`} icon={<Play size={14} />} size="sm" />
+        </span>
+      ),
+    },
+  ]
 
   const demoLangs: Lang[] = [
     { code: 'zh', zhName: '简体中文', enName: 'Chinese Simplified', core: true },
@@ -426,6 +474,60 @@ export default function PrimitivesPage() {
         <p className="text-body text-ink2">抽屉内容。宽度 360（术语本 420），左侧圆角 --radius-lg。</p>
         <p className="mt-2 text-caption text-ink3">Tab 在抽屉内循环；Esc 关闭；焦点回到触发按钮。</p>
       </Drawer>
+
+      <Section id="sec-datatable" title="DataTable（§5.7 · 5000 行虚拟化 · 键盘 ↑↓/Space/Enter）">
+        <p className="text-caption text-ink3">
+          上表 5000 行（虚拟滚动只渲染可视窗口 + 12 行缓冲）。容器聚焦后 ↑↓ 移动、Home/End
+          跳首尾、Space 勾选、Enter 触发行点击；Shift+点击 连选。
+        </p>
+        <div className="h-96 overflow-hidden rounded-md bg-surface">
+          <DataTable
+            aria-label="5000 行虚拟化演示表"
+            columns={demoColumns}
+            rows={bigRows}
+            rowKey={(r) => r.id}
+            selectable
+            selected={sel}
+            onSelectedChange={setSel}
+            onRowClick={() => {}}
+          />
+        </div>
+        <p className="num text-caption text-ink3">已选 {sel.size} 行（选中数由调用方读 selected.size 展示在工具栏）</p>
+      </Section>
+
+      <Section id="sec-datatable-small" title="DataTable（舒适态 40px 行 + 空态）">
+        <div className="mb-4 h-56 overflow-hidden rounded-md bg-surface">
+          <DataTable
+            aria-label="12 行舒适态演示表"
+            columns={demoColumns.slice(0, 4)}
+            rows={smallRows}
+            rowKey={(r) => r.id}
+            rowHeight={40}
+          />
+        </div>
+        <Surface dense>
+          <DataTable
+            aria-label="空态演示表"
+            columns={demoColumns.slice(0, 3)}
+            rows={[]}
+            rowKey={(r) => r.id}
+            emptyState={
+              <EmptyState
+                icon={<Inbox size={48} strokeWidth={1.5} />}
+                title="没有失败的行"
+                body="全部行翻译完成后这里将保持为空。"
+              />
+            }
+          />
+        </Surface>
+      </Section>
+
+      <Section id="sec-datatable-actions" title="行内操作（opacity 显现，始终在 Tab 序内）">
+        <p className="text-caption text-ink3">
+          用 opacity-0 + group-hover/focus-within 显现（禁止 display:none——会脱离 Tab 序）。
+          键盘 Tab 到按钮时同样显现。
+        </p>
+      </Section>
     </main>
   )
 }

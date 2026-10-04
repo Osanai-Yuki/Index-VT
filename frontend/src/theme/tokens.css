@@ -245,6 +245,10 @@
   --text-micro: 11px;
   --text-micro--line-height: 1.4;
   --text-micro--font-weight: 500;
+
+  /* §5.7 表头字距（.08em 字面值的 token 化，Task 2.9 补齐）：uppercase 表头用 tracking-caps。
+     §10 禁止 tracking-[.08em] 任意值。字距不随主题切换 → 与圆角同段给字面值。 */
+  --tracking-caps: 0.08em;
 }
 
 /* ── 5. 颜色：@theme inline + 异名变量 ─────────────────────────────
