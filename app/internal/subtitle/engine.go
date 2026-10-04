@@ -100,13 +100,16 @@ type QueueOptions struct {
 
 // CueProgress 队列进度事件（100ms 合并后推送）。
 type CueProgress struct {
-	DocID    string `json:"docId"`
-	CueIndex int    `json:"cueIndex"`
-	State    CueState `json:"state"`
-	Done     int    `json:"done"`
-	Total    int    `json:"total"`
-	OffTarget bool  `json:"offTarget,omitempty"`
-	NeedsCheck bool `json:"needsCheck,omitempty"`
+	DocID      string   `json:"docId"`
+	CueIndex   int      `json:"cueIndex"`
+	State      CueState `json:"state"`
+	Done       int      `json:"done"`
+	Total      int      `json:"total"`
+	OffTarget  bool     `json:"offTarget,omitempty"`
+	NeedsCheck bool     `json:"needsCheck,omitempty"`
+	// Translated 是终态事件的译文文本（B1）。前端「译文」列的唯一实时来源；
+	// 缺失时批量翻译的结果在界面上永远不可见 —— 这正是重构前的实际症状。
+	Translated string `json:"translated,omitempty"`
 }
 
 // TranslateCueFn 单条翻译函数（app 层桥接 translator，队列与模型解耦）。

@@ -54,6 +54,7 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 
 	go func() {
 		defer func() {
+			cancel() // B6：正常结束也必须释放，否则每跑一次队列泄漏一个 ctx
 			e.mu.Lock()
 			delete(e.queueCancel, docID)
 			e.mu.Unlock()
@@ -61,20 +62,44 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 		total := len(targets)
 		done := 0
 		var lastEmit time.Time
+		var pending *CueProgress
+		// flushPending 冲出挂起的非终态事件（至多一条）。done/total 取调用时刻的值，
+		// 而非挂起时刻的快照：事件表达的是「此刻仍在翻译 + 已掌握的最新进度」，
+		// 且它们先于同批次的终态事件送出、计数单调不减，不会出现进度倒退。
+		flushPending := func() {
+			if pending == nil {
+				return
+			}
+			q := *pending
+			q.DocID, q.Total, q.Done = docID, total, done
+			pending = nil
+			onProgress(q)
+		}
 		emit := func(p CueProgress) {
 			if onProgress == nil {
 				return
 			}
-			// 100ms 合并（02 文档 §11.4）；终态事件立即推送
-			if p.State != CueDone && p.State != CueFailed && time.Since(lastEmit) < 100*time.Millisecond {
+			// B4：终态立即推（并先冲掉挂起的非终态）；非终态只保留最新一条，
+			// 到点合并发出。旧实现整条丢弃 → 行看起来卡在 pending。
+			if p.State == CueDone || p.State == CueFailed {
+				flushPending()
+				p.DocID, p.Total, p.Done = docID, total, done
+				lastEmit = time.Now()
+				onProgress(p)
 				return
 			}
+			if time.Since(lastEmit) < 100*time.Millisecond {
+				cp := p
+				pending = &cp
+				return
+			}
+			p.DocID, p.Total, p.Done = docID, total, done
 			lastEmit = time.Now()
-			p.DocID = docID
-			p.Total = total
-			p.Done = done
 			onProgress(p)
 		}
+		// 注册在拥有 pending 的 goroutine 内、紧随 emit 之后：队列退出（含取消）
+		// 时最后一条 translating 也会被冲出，且发生在删除 queueCancel 之前。
+		defer flushPending()
 		for _, idx := range targets {
 			select {
 			case <-ctx.Done():
@@ -93,8 +118,8 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 			if strings.TrimSpace(rawText) == "" {
 				cue.State = CueSkipped
 				e.mu.Unlock()
+				done++ // B2（跳过分支同序）：先计数再 emit，totals 保持一致
 				emit(CueProgress{CueIndex: cue.Index, State: CueSkipped})
-				done++
 				continue
 			}
 			cue.State = CueTranslating
@@ -135,14 +160,19 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 				cue.OffTarget = offTargetCheck(back, opt.TargetLang)
 				cue.NeedsCheck = needsCheck
 			}
-			e.mu.Unlock()
-			if err != nil {
-				emit(CueProgress{CueIndex: cue.Index, State: CueFailed})
-			} else {
-				emit(CueProgress{CueIndex: cue.Index, State: CueDone,
-					OffTarget: cue.OffTarget, NeedsCheck: cue.NeedsCheck})
+			// 不变量（spec §7.2）：持锁期间不 emit。所需值先在锁内拷成局部值，
+			// 解锁后不得再经 cue 指针读取 doc.Cues（B3：与快照/其它写者竞争）。
+			p := CueProgress{
+				CueIndex:   cue.Index,
+				State:      cue.State,
+				OffTarget:  cue.OffTarget,
+				NeedsCheck: cue.NeedsCheck,
+				Translated: cue.Translated,
 			}
-			done++
+			e.mu.Unlock()
+
+			done++ // B2：先计数再 emit，最后一行 Done == Total
+			emit(p)
 		}
 	}()
 	return nil

@@ -168,3 +168,147 @@ func TestEvictionCancelsRunningQueue(t *testing.T) {
 		t.Fatalf("最旧文档未被淘汰（docs=%d）", n)
 	}
 }
+
+// ============================================================================
+// Task 1.9：字幕事件契约（B1 译文 / B2 计数差一 / B4 节流丢弃）。
+// helper（newDocForTest / waitQueueDone）在 testhelpers_test.go，勿重复定义。
+// ============================================================================
+
+// 终态事件必须带译文，且最后一行 Done == Total（B1/B2）。
+func TestQueueEmitsTranslatedAndCorrectCount(t *testing.T) {
+	e := NewEngine(func(ctx context.Context, text, src, dst string) (string, error) {
+		return "译文:" + text, nil
+	})
+	doc := newDocForTest(3)
+	e.mu.Lock()
+	e.docs[doc.ID] = doc
+	e.mu.Unlock()
+
+	var events []CueProgress
+	done := make(chan struct{})
+	err := e.TranslateQueue(doc.ID, QueueOptions{TargetLang: "zh"}, func(p CueProgress) {
+		events = append(events, p)
+		if p.State == CueDone && p.Done == p.Total {
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitQueueDone(t, e, doc.ID)
+
+	var lastDone CueProgress
+	for _, p := range events {
+		if p.State == CueDone {
+			lastDone = p
+		}
+		if p.State == CueDone && !strings.HasPrefix(p.Translated, "译文:") {
+			t.Fatalf("终态事件缺译文: %+v", p)
+		}
+		if p.DocID != doc.ID {
+			t.Fatalf("DocID 未填: %q", p.DocID)
+		}
+	}
+	if lastDone.Done != lastDone.Total {
+		t.Fatalf("计数差一：Done=%d Total=%d（应相等）", lastDone.Done, lastDone.Total)
+	}
+	if lastDone.Total != 3 {
+		t.Fatalf("Total=%d，期望 3", lastDone.Total)
+	}
+}
+
+// B4 回归（brief Step 6 无对应测试，此处补一条）：非终态事件不得被节流丢弃 ——
+// 每条 cue 的 translating 必须先于其终态送达；队列退出（含取消）时挂起的
+// translating 也要在删除 queueCancel 之前冲出。
+func TestQueueCoalescesNonTerminalEvents(t *testing.T) {
+	// 正常路径：快速翻译 → translating 事件被合并，但每条 cue 终态前必先见到 translating。
+	e := NewEngine(func(ctx context.Context, text, src, dst string) (string, error) {
+		return "T" + text, nil
+	})
+	doc := newDocForTest(5)
+	e.mu.Lock()
+	e.docs[doc.ID] = doc
+	e.mu.Unlock()
+
+	var events []CueProgress
+	if err := e.TranslateQueue(doc.ID, QueueOptions{TargetLang: "zh"}, func(p CueProgress) {
+		events = append(events, p)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueDone(t, e, doc.ID) // 之后 events 才可安全读取（回调在队列 goroutine 内）
+
+	for i, p := range events {
+		if p.State != CueDone {
+			continue
+		}
+		seen := false
+		for j := 0; j < i; j++ {
+			if events[j].State == CueTranslating && events[j].CueIndex == p.CueIndex {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			t.Fatalf("cue %d 的 translating 事件被节流丢弃（终态前未见）: %+v", p.CueIndex, events)
+		}
+	}
+
+	// 取消路径：cue2 挂起的 translating 必须在队列退出时冲出（defer flushPending）。
+	calls := 0
+	e2 := NewEngine(func(ctx context.Context, text, src, dst string) (string, error) {
+		calls++
+		if calls > 1 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
+		}
+		return "T" + text, nil
+	})
+	doc2 := newDocForTest(5)
+	e2.mu.Lock()
+	e2.docs[doc2.ID] = doc2
+	e2.mu.Unlock()
+
+	var events2 []CueProgress
+	if err := e2.TranslateQueue(doc2.ID, QueueOptions{TargetLang: "zh"}, func(p CueProgress) {
+		events2 = append(events2, p)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 持 e.mu 轮询引擎状态（不读 events2，避免测试自身竞争）：等 cue2 进入 translating
+	// 即事件已（或即将）挂起，再取消。5s 超时说明队列根本没跑起来。
+	deadline := time.Now().Add(5 * time.Second)
+	st := CuePending
+	for time.Now().Before(deadline) {
+		e2.mu.Lock()
+		st = e2.docs[doc2.ID].Cues[1].State
+		e2.mu.Unlock()
+		if st == CueTranslating {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if st != CueTranslating {
+		t.Fatalf("队列未在 5s 内进入第二轮 translating（state=%v）", st)
+	}
+	e2.CancelQueue(doc2.ID)
+	waitQueueDone(t, e2, doc2.ID)
+
+	if len(events2) == 0 {
+		t.Fatal("取消队列未收到任何事件")
+	}
+	last := events2[len(events2)-1]
+	if last.State != CueTranslating || last.CueIndex != 2 {
+		t.Fatalf("队列退出时挂起的 translating 未冲出: %+v", events2)
+	}
+	if last.Done != 1 || last.Total != 5 || last.DocID != doc2.ID {
+		t.Fatalf("退出补发事件计数/DocID 错误: %+v", last)
+	}
+}
