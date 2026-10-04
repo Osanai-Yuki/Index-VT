@@ -13,6 +13,15 @@ import (
 	"sync"
 )
 
+// MaxSubtitleBytes 字幕文件大小上限（B29）：32MB 远超任何真实字幕文件，
+// 用于拒绝误选的整本小说或二进制文件 —— 旧实现 os.ReadFile 会直接吃满内存。
+const MaxSubtitleBytes = 32 << 20
+
+// maxRetainedDocs 同时保留的文档数上限（B29）：文档元数据本身很小，但每篇都持有
+// 全部 cue；8 篇覆盖「一份正在打开 + 近期反复打开过的几份」的常见用法，
+// 同时保证长会话中 docs map 不会无界增长。
+const maxRetainedDocs = 8
+
 // Format 字幕格式。
 type Format string
 
@@ -110,6 +119,7 @@ type Engine struct {
 	seq      int
 	translate TranslateCueFn
 	queueCancel map[string]*queueCtl
+	order    []string // LRU 最近使用顺序（末尾最新），仅由 touchLocked 在持 e.mu 时维护
 }
 
 // NewEngine 创建引擎。translateCue 为单条翻译桥接（可 nil，测试时注入假实现）。
@@ -124,7 +134,15 @@ func NewEngine(translateCue TranslateCueFn) *Engine {
 // ---------- Open ----------
 
 // Open 自动识别格式+编码（UTF-8 含/不含 BOM / GBK），解析为文档。
+// 先量大小再读：超过 MaxSubtitleBytes 的直接拒绝，避免误选小说/二进制吃满内存（B29）。
 func (e *Engine) Open(path string) (*SubtitleDoc, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > MaxSubtitleBytes {
+		return nil, fmt.Errorf("文件过大（%d 字节，上限 %d 字节），请确认选的是字幕文件", st.Size(), int64(MaxSubtitleBytes))
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -168,10 +186,12 @@ func (e *Engine) Open(path string) (*SubtitleDoc, error) {
 		EventsLines: eventsFormat,
 	}
 	e.docs[doc.ID] = doc
+	e.touchLocked(doc.ID)
 	return doc, nil
 }
 
-// GetDoc 取文档（app 层读 cue 列表用）。
+// GetDoc 取文档快照（app 层读 cue 列表用）。
+// 返回隔离副本：调用方改写返回值既不影响引擎状态，也不与翻译队列的写入竞争。
 func (e *Engine) GetDoc(id string) (*SubtitleDoc, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -179,7 +199,42 @@ func (e *Engine) GetDoc(id string) (*SubtitleDoc, error) {
 	if !ok {
 		return nil, fmt.Errorf("文档 %s 不存在", id)
 	}
-	return d, nil
+	e.touchLocked(id)
+	return e.snapshotLocked(d), nil
+}
+
+// snapshotLocked 在持有 e.mu 时返回与后续队列写入隔离的文档副本。
+// Cue 的字段全是值类型/不可变 string，拷贝切片即足够；Styles/HeaderLines 同样浅拷贝安全
+// （它们在 Open 后不再被改写）。序列化在解锁后进行，慢但不会阻塞队列。
+func (e *Engine) snapshotLocked(doc *SubtitleDoc) *SubtitleDoc {
+	cues := make([]Cue, len(doc.Cues))
+	copy(cues, doc.Cues)
+	out := *doc
+	out.Cues = cues
+	if len(doc.Styles) > 0 {
+		out.Styles = append([]StyleDef(nil), doc.Styles...)
+	}
+	return &out
+}
+
+// touchLocked 维护最近使用顺序并在超限时淘汰最旧文档；调用方须持 e.mu。
+// 不淘汰就意味着长时间使用时内存单调增长（B29）。
+func (e *Engine) touchLocked(id string) {
+	for i, s := range e.order {
+		if s == id {
+			e.order = append(e.order[:i], e.order[i+1:]...)
+			break
+		}
+	}
+	e.order = append(e.order, id)
+	for len(e.order) > maxRetainedDocs {
+		oldest := e.order[0]
+		e.order = e.order[1:]
+		if ctl, busy := e.queueCancel[oldest]; busy {
+			ctl.cancel() // 淘汰对象仍在跑队列：先取消再删除，不得把文档从活 goroutine 底下抽走
+		}
+		delete(e.docs, oldest)
+	}
 }
 
 // detectFormat 扩展名优先，内容嗅探兜底。
@@ -221,11 +276,13 @@ func min(a, b int) int {
 func (e *Engine) Export(docID string, opt ExportOptions) error {
 	e.mu.Lock()
 	doc, ok := e.docs[docID]
-	e.mu.Unlock()
 	if !ok {
+		e.mu.Unlock()
 		return fmt.Errorf("文档 %s 不存在", docID)
 	}
-	data, err := e.serialize(doc, opt)
+	snap := e.snapshotLocked(doc)
+	e.mu.Unlock()
+	data, err := e.serialize(snap, opt)
 	if err != nil {
 		return err
 	}
@@ -259,22 +316,26 @@ func (e *Engine) serialize(doc *SubtitleDoc, opt ExportOptions) ([]byte, error) 
 func (e *Engine) ExportToBytes(docID string, opt ExportOptions) ([]byte, error) {
 	e.mu.Lock()
 	doc, ok := e.docs[docID]
-	e.mu.Unlock()
 	if !ok {
+		e.mu.Unlock()
 		return nil, fmt.Errorf("文档 %s 不存在", docID)
 	}
-	return e.serialize(doc, opt)
+	snap := e.snapshotLocked(doc)
+	e.mu.Unlock()
+	return e.serialize(snap, opt)
 }
 
 // ExportOriginal 导出原文内容（keep-original 模式"原文另存"，LRC 为 .lrc.orig 约定）。
 func (e *Engine) ExportOriginal(docID string, opt ExportOptions) error {
 	e.mu.Lock()
 	doc, ok := e.docs[docID]
-	e.mu.Unlock()
 	if !ok {
+		e.mu.Unlock()
 		return fmt.Errorf("文档 %s 不存在", docID)
 	}
-	data, err := e.serialize(doc, ExportOptions{
+	snap := e.snapshotLocked(doc)
+	e.mu.Unlock()
+	data, err := e.serialize(snap, ExportOptions{
 		Format:    opt.Format,
 		Encoding:  opt.Encoding,
 		Bilingual: BilingualTranslationOnly,
@@ -283,7 +344,7 @@ func (e *Engine) ExportOriginal(docID string, opt ExportOptions) error {
 		return err
 	}
 	// keep-original 的原文文件：内容应为原文而非译文
-	data, err = e.serializeWithText(doc, opt.Format, true)
+	data, err = e.serializeWithText(snap, opt.Format, true)
 	if err != nil {
 		return err
 	}
