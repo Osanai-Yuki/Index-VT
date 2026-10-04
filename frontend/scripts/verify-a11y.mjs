@@ -118,16 +118,16 @@ async function scanCombo(page, AxeBuilder, width, theme) {
   await page.setViewportSize({ width, height: 800 })
   await page.goto(DEV_URL + PAGE_PATH.replace(/^\//, ''), { waitUntil: 'domcontentloaded' })
   await page.waitForLoadState('networkidle').catch(() => {})
-  /* 主题切换走真实运行时（写 localStorage + data-theme）；模块若不可达
-     （例如页面模块加载失败）则退化为 DOM 属性直写，保证扫描总能换上主题。 */
+  /* 主题写入走真实运行时（localStorage + data-theme），然后 **reload**：
+     组件层的 180ms 颜色过渡会让 axe 采到插值中间色（实测六组连跑时 dark@首个组合
+     偶发 color-contrast 误报）。reload 后由 index.html 内联脚本在首帧前设好
+     data-theme，扫描发生在无过渡的冷启动状态，与真实用户首帧一致。 */
   await page.evaluate(async ({ mod, t }) => {
-    try {
-      const m = await import(mod)
-      m.applyTheme(t)
-    } catch {
-      document.documentElement.setAttribute('data-theme', t)
-    }
+    const m = await import(mod)
+    m.applyTheme(t)
   }, { mod: THEME_MODULE, t: theme })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForLoadState('networkidle').catch(() => {})
 
   const results = await new AxeBuilder({ page }).analyze()
   const byImpact = { critical: 0, serious: 0, moderate: 0, minor: 0 }

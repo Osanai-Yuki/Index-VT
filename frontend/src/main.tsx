@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import PrimitivesPage from './pages/_Primitives'
 /* CSS 导入顺序 = 层叠顺序，**不可调换**：
    旧 styles/tokens.css 在前（现存 6 个页面有 203 处旧 utility 依赖它，Track C 才整体删除），
    新 theme/* 在后。新层原始变量一律加 --suj- 前缀（--suj-ink-1 / --suj-accent / --suj-danger …），
@@ -24,8 +25,12 @@ watchSystemTheme(() => {
   if (storedTheme() === 'system') applyTheme('system')
 })
 
+/* dev-only 原语陈列页（Task 2.5）：/?primitives 查询参数判定，不进导航。
+   文件头注明「交付前删除」；此处条件渲染是它唯一的接线点。 */
+const isPrimitivesDemo = new URLSearchParams(window.location.search).has('primitives')
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    {isPrimitivesDemo ? <PrimitivesPage /> : <App />}
   </React.StrictMode>,
 )

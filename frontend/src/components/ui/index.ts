@@ -1,0 +1,18 @@
+// 素笺原语 barrel —— Track B 2.5–2.9 与 Track C 页面层的统一导入面。
+// 后续原语（Field/Textarea/…/DataTable）在此追加导出。
+export { Button } from './Button'
+export type { ButtonKind, ButtonSize, ButtonProps } from './Button'
+export { IconButton } from './IconButton'
+export type { IconButtonProps } from './IconButton'
+export { Badge } from './Badge'
+export type { BadgeTone, BadgeProps } from './Badge'
+export { Segmented } from './Segmented'
+export type { SegmentedProps } from './Segmented'
+export { Switch } from './Switch'
+export type { SwitchProps } from './Switch'
+export { Checkbox } from './Checkbox'
+export type { CheckboxProps } from './Checkbox'
+export { Kbd } from './Kbd'
+export type { KbdProps } from './Kbd'
+export { Spinner } from './Spinner'
+export type { SpinnerProps } from './Spinner'
