@@ -75,21 +75,26 @@ var procTerminateProcess = kernel32.NewProc("TerminateProcess")
 
 // ---------- 单实例锁（01 文档 §9：Global\IndexVT-SingleInstance） ----------
 
-// TryCreateMutex 成功返回句柄与 true；已存在（二次启动）返回 false。
+var procCreateMutexW = kernel32.NewProc("CreateMutexW")
+
+// TryCreateMutex 创建单实例锁。成功返回句柄与 true；锁已存在（二次启动）
+// 返回句柄与 false、err == nil；err != nil 表示锁状态未知（创建失败），
+// 调用方应 fail-open 照常启动，而不是当作已有实例。
 func TryCreateMutex(name string) (windows.Handle, bool, error) {
-	utf16, err := windows.UTF16PtrFromString(name)
+	nameP, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return 0, false, err
 	}
-	h, err := windows.CreateMutex(nil, false, utf16)
-	if err != nil {
-		// ERROR_ALREADY_EXISTS 时 CreateMutex 仍返回句柄
-		if errno, ok := err.(windows.Errno); ok && errno == 183 { // ERROR_ALREADY_EXISTS
-			return h, false, nil
-		}
-		return 0, false, err
+	// GetLastError 必须紧邻 CreateMutexW 读取，中间不得插入其他 syscall。
+	// 直接调用而非用 windows.CreateMutex 包装器：后者对 ERROR_ALREADY_EXISTS
+	// 的处理随 x/sys 版本变化，不能依赖其区分「已存在」与「创建失败」。
+	r, _, lastErr := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(nameP)))
+	if r == 0 {
+		// 真正的创建失败：不能当成"已有实例在跑"，调用方应照常启动
+		return 0, false, fmt.Errorf("CreateMutex: %w", lastErr)
 	}
-	return h, true, nil
+	alreadyRunning := lastErr == windows.ERROR_ALREADY_EXISTS
+	return windows.Handle(r), !alreadyRunning, nil
 }
 
 // ReleaseMutex 释放单实例锁句柄。

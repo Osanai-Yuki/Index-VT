@@ -56,14 +56,18 @@ func main() {
 
 	// 单实例锁（01 文档 §9 / F-20）：二次启动激活既有窗口后退出
 	mh, acquired, err := winproc.TryCreateMutex(mutexName)
-	if err != nil {
-		slog.Error("单实例锁创建失败", "err", err)
-	} else {
-		defer winproc.ReleaseMutex(mh)
-	}
-	if !acquired {
+	switch {
+	case err != nil:
+		// 锁创建失败 ≠ 已有实例。此处必须 fail-open：若当成"已有实例"，
+		// 任何 CreateMutex 异常（权限、策略、Global\ 命名空间限制）都会让
+		// 程序去激活一个不存在的窗口然后退出，看起来像"双击没反应"（B15）。
+		slog.Error("单实例锁创建失败，继续启动", "err", err)
+	case !acquired:
+		slog.Info("已有实例在运行，激活其窗口后退出")
 		winproc.ActivateExistingWindow(windowTitle)
 		return
+	default:
+		defer winproc.ReleaseMutex(mh)
 	}
 
 	_ = paths.EnsureDirs()
