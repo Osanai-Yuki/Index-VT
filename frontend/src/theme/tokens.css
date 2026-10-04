@@ -195,6 +195,12 @@
   --suj-text-read: 15.5px;
   --suj-text-body: 13.5px;
   --suj-text-caption: 12px;
+
+  /* §5.9 浮层尺寸（字面值补齐的契约名，Task 2.8 token 化并回写 DESIGN.md §5.9）：
+     Modal max-w 480 / Drawer 360（术语本 420）。§10 禁止 max-w-[480px] 一类任意值。 */
+  --suj-modal-max: 480px;
+  --suj-drawer-w: 360px;
+  --suj-drawer-w-lg: 420px;
 }
 
 /* ── 4. 几何 / 字体 / 字阶：@theme 内一律给字面值 ─────────────────

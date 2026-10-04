@@ -11,11 +11,13 @@ import {
   Badge,
   Button,
   Checkbox,
+  Drawer,
   EmptyState,
   Field,
   IconButton,
   Kbd,
   LangPicker,
+  Modal,
   NumberField,
   Popover,
   Progress,
@@ -26,7 +28,10 @@ import {
   Surface,
   Switch,
   Textarea,
+  toast,
+  ToastHost,
   Tooltip,
+  useToastStore,
   type Lang,
 } from '../components/ui/index'
 // 注意：并存期旧 src/components/ui.tsx 会遮蔽 '../components/ui' 短路径（文件优先于目录），
@@ -65,6 +70,10 @@ export default function PrimitivesPage() {
   const [text, setText] = useState('')
   const [pop, setPop] = useState(false)
   const [lang, setLang] = useState('zh')
+  const [modal, setModal] = useState(false)
+  const [confirmModal, setConfirmModal] = useState(false)
+  const [drawer, setDrawer] = useState(false)
+  const toasts = useToastStore((s) => s.toasts)
 
   const demoLangs: Lang[] = [
     { code: 'zh', zhName: '简体中文', enName: 'Chinese Simplified', core: true },
@@ -330,6 +339,93 @@ export default function PrimitivesPage() {
         </Row>
         <p className="text-caption text-ink3">IconButton 自带 tooltip（label 即提示），无需再包一层。</p>
       </Section>
+
+      <Section id="sec-modal" title="Modal（§5.9，焦点陷入 / Esc / 焦点归还）">
+        <Row label="普通">
+          <Button onClick={() => setModal(true)}>打开 Modal</Button>
+        </Row>
+        <Row label="破坏性确认">
+          <Button kind="danger" onClick={() => setConfirmModal(true)}>
+            删除模型…
+          </Button>
+        </Row>
+      </Section>
+
+      <Section id="sec-drawer" title="Drawer（右滑出 360/420）">
+        <Button onClick={() => setDrawer(true)}>打开术语本抽屉</Button>
+      </Section>
+
+      <Section id="sec-toast" title={`Toast（右下 · 上限 3 · 当前 ${toasts.length} 条）`}>
+        <Row label="四种 tone">
+          <Button size="sm" onClick={() => toast.push({ tone: 'info', message: '已切换到系统主题。' })}>
+            info
+          </Button>
+          <Button size="sm" onClick={() => toast.push({ tone: 'ok', message: '校验通过：SHA256 一致。' })}>
+            ok
+          </Button>
+          <Button size="sm" onClick={() => toast.push({ tone: 'warn', message: '显存余量不足 2 GB。' })}>
+            warn
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => toast.push({ tone: 'error', message: '下载失败：SHA256SUMS 不可达（不会自动消失）。' })}
+          >
+            error
+          </Button>
+        </Row>
+        <Row label="带动作">
+          <Button
+            size="sm"
+            onClick={() =>
+              toast.push({
+                tone: 'info',
+                message: '已导入 128 条术语。',
+                action: { label: '查看', run: () => toast.push({ tone: 'ok', message: '已打开术语本。' }) },
+              })
+            }
+          >
+            action
+          </Button>
+        </Row>
+      </Section>
+
+      {/* ── 受控浮层实例（陈列页挂载 ToastHost 供上面按钮演示）── */}
+      <ToastHost />
+
+      <Modal open={modal} onClose={() => setModal(false)} title="导出字幕">
+        <p>将以当前格式导出全部字幕行，已翻译行使用最新译文。</p>
+        <Field className="mt-3" label="导出文件名" defaultValue="episode-01" />
+        footer 按钮通过 data-modal-initial 标记初始焦点目标。
+      </Modal>
+      <Modal
+        open={confirmModal}
+        onClose={() => setConfirmModal(false)}
+        title="删除模型？"
+        initialFocus="cancel"
+        footer={
+          <>
+            <Button data-modal-initial="cancel" onClick={() => setConfirmModal(false)}>
+              取消
+            </Button>
+            <Button
+              kind="danger"
+              data-modal-initial="confirm"
+              onClick={() => {
+                setConfirmModal(false)
+                toast.push({ tone: 'ok', message: '已删除模型（演示）。' })
+              }}
+            >
+              删除
+            </Button>
+          </>
+        }
+      >
+        <p>此操作不可恢复。删除后如需再次使用须重新下载模型文件。</p>
+      </Modal>
+      <Drawer open={drawer} onClose={() => setDrawer(false)} title="术语本">
+        <p className="text-body text-ink2">抽屉内容。宽度 360（术语本 420），左侧圆角 --radius-lg。</p>
+        <p className="mt-2 text-caption text-ink3">Tab 在抽屉内循环；Esc 关闭；焦点回到触发按钮。</p>
+      </Drawer>
     </main>
   )
 }

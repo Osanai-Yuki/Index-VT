@@ -139,7 +139,41 @@ body {
 }
 
 .enter-pop {
-  animation: suj-pop-in var(--suj-dur-quick) var(--suj-ease-signature) both;
+  animation: suj-pop-in var(--suj-dur-quick) var(--suj-ease-signature) backwards;
+}
+
+/* Modal / Drawer / Toast / Scrim 入场（§5.9 字面值）。
+   fill 用 backwards 而非 both：动画结束后不再锁定终态关键帧，
+   ToastHost 的 FLIP 让位位移（inline transform）才能生效。 */
+@keyframes suj-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes suj-modal-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes suj-drawer-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes suj-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.enter-scrim {
+  animation: suj-scrim-in 200ms var(--suj-ease-signature) backwards;
+}
+.enter-modal {
+  animation: suj-modal-in var(--suj-dur-standard) var(--suj-ease-signature) backwards;
+}
+.enter-drawer {
+  animation: suj-drawer-in var(--suj-dur-standard) var(--suj-ease-signature) backwards;
+}
+/* §5.9 Toast 入场 280ms——组件规格字面值，不属三档 token */
+.enter-toast {
+  animation: suj-toast-in 280ms var(--suj-ease-signature) backwards;
 }
 
 /* ── 滚动条（WebView2 = Chromium，用 -webkit- 前缀即可）────────── */

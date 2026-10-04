@@ -250,6 +250,8 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 统一行为：Esc 关闭最上层；焦点陷入浮层内；关闭后焦点**回到触发元素**；Toast 自动消失 4s（error 类不自动消失，带关闭按钮）。
 **禁止 `alert()` / `confirm()` / `prompt()`**——旧实现有 8 处，桌面应用里弹系统框最伤质感。确认走 Modal，通知走 Toast。
 
+> 浮层尺寸 token（Task 2.8 补齐并回写）：Modal `max-width: 480px`（`--modal-max`）、Drawer `360px`（`--drawer-w`）与 `420px`（`--drawer-w-lg`），实现名 `--suj-*`（见 §9）。§10 禁止任意值，2.5–2.9 与 Track C 一律引用 token。
+
 ### 5.10 EmptyState
 
 居中；48px 线性图标（`--ink-3`，stroke 1.5，lucide）；标题 `--text-title` `--ink-2`；正文 `--text-caption` `--ink-3` 限宽 40ch；**一个**主操作（`lg`）。留白即装饰——不使用点阵网格背景（旧签名细节，本版废弃）。

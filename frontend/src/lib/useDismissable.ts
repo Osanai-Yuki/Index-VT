@@ -10,6 +10,16 @@ import type { RefObject } from 'react'
 
 type EscEntry = { onClose: () => void }
 
+/** 焦点陷入（focus trap）用：层内可聚焦元素选择器（Modal/Drawer 共享） */
+export const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'textarea:not([disabled])',
+  'input:not([type="hidden"]):not([disabled])',
+  'select:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ')
+
 /* 模块级栈：只有一份；栈顶即当前最上层浮层 */
 const escStack: EscEntry[] = []
 let escListening = false
@@ -94,4 +104,34 @@ export function useDismissable({
       }
     }
   }, [open, dismissOnEscape, dismissOnOutsideClick, restoreFocus, layerRef, triggerRef])
+}
+
+/** 焦点陷入（计划 Task 2.8 Step 1）：active 期间 Tab/Shift+Tab 在容器内循环。
+    捕获阶段监听，先于页内其余 keydown 处理；隐藏元素（无客户区矩形）跳过。 */
+export function useFocusTrap(layerRef: RefObject<HTMLElement | null>, active: boolean): void {
+  useEffect(() => {
+    if (!active) return
+    const el = layerRef.current
+    if (!el) return
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+      const nodes = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+        (n) => n.getClientRects().length > 0,
+      )
+      if (nodes.length === 0) return
+      const first = nodes[0]
+      const last = nodes[nodes.length - 1]
+      const activeEl = document.activeElement
+      if (!e.shiftKey && (activeEl === last || !el.contains(activeEl))) {
+        e.preventDefault()
+        first.focus()
+      } else if (e.shiftKey && (activeEl === first || !el.contains(activeEl))) {
+        e.preventDefault()
+        last.focus()
+      }
+    }
+    el.addEventListener('keydown', onKey, true)
+    return () => el.removeEventListener('keydown', onKey, true)
+  }, [layerRef, active])
 }
