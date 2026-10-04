@@ -15,7 +15,9 @@ import {
   Field,
   IconButton,
   Kbd,
+  LangPicker,
   NumberField,
+  Popover,
   Progress,
   Segmented,
   Skeleton,
@@ -24,6 +26,8 @@ import {
   Surface,
   Switch,
   Textarea,
+  Tooltip,
+  type Lang,
 } from '../components/ui/index'
 // 注意：并存期旧 src/components/ui.tsx 会遮蔽 '../components/ui' 短路径（文件优先于目录），
 // 故显式导入 ui/index；Track C 删除旧 ui.tsx 后可改回短路径。
@@ -59,6 +63,21 @@ export default function PrimitivesPage() {
   const [num, setNum] = useState(4)
   const [slide, setSlide] = useState(30)
   const [text, setText] = useState('')
+  const [pop, setPop] = useState(false)
+  const [lang, setLang] = useState('zh')
+
+  const demoLangs: Lang[] = [
+    { code: 'zh', zhName: '简体中文', enName: 'Chinese Simplified', core: true },
+    { code: 'zh-TW', zhName: '繁體中文', enName: 'Chinese Traditional' },
+    { code: 'en', zhName: '英语', enName: 'English', core: true },
+    { code: 'ja', zhName: '日语', enName: 'Japanese', core: true },
+    { code: 'ko', zhName: '韩语', enName: 'Korean', core: true },
+    { code: 'de', zhName: '德语', enName: 'German' },
+    { code: 'fr', zhName: '法语', enName: 'French' },
+    { code: 'es', zhName: '西班牙语', enName: 'Spanish' },
+    { code: 'ru', zhName: '俄语', enName: 'Russian' },
+    { code: 'pt', zhName: '葡萄牙语', enName: 'Portuguese' },
+  ]
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-12 px-6 py-10">
@@ -269,6 +288,47 @@ export default function PrimitivesPage() {
           <Progress pct={90} tone="warn" label="显存占用" />
           <Progress pct={100} label="已完成" />
         </div>
+      </Section>
+
+      <Section id="sec-popover" title="Popover（§5.9，Esc / 点外部关闭）">
+        <Button kind="secondary" aria-expanded={pop} onClick={() => setPop((v) => !v)}>
+          {pop ? '关闭浮层' : '打开浮层'}
+        </Button>
+        <Popover open={pop} onClose={() => setPop(false)} anchorRef={{ current: null }}>
+          <p className="text-body text-ink1">浮层内容（role=dialog，非模态）</p>
+          <p className="text-caption text-ink3">Esc / 点击外部关闭，焦点回到触发按钮。</p>
+        </Popover>
+      </Section>
+
+      <Section id="sec-langpicker" title="LangPicker（§5.6，虚拟化 listbox）">
+        <div className="flex flex-wrap items-end gap-6">
+          <LangPicker
+            langs={demoLangs}
+            value={lang}
+            onChange={setLang}
+            isSource
+            detected="ja"
+            recent={['en', 'ko']}
+            label="源语言"
+          />
+          <span className="text-caption text-ink3">
+            当前：<span className="num">{lang}</span>（触发器副行展示 DETECTED）
+          </span>
+        </div>
+      </Section>
+
+      <Section id="sec-tooltip" title="Tooltip（400ms 延迟 / 键盘聚焦可触发）">
+        <Row label="hover / Tab">
+          <Tooltip content="开始翻译任务（Ctrl+Enter）">
+            <Button kind="primary">翻译</Button>
+          </Tooltip>
+          <Tooltip content="原生按钮也能承载 tooltip">
+            <button type="button" className="text-body text-accent underline underline-offset-2">
+              链接式触发
+            </button>
+          </Tooltip>
+        </Row>
+        <p className="text-caption text-ink3">IconButton 自带 tooltip（label 即提示），无需再包一层。</p>
       </Section>
     </main>
   )

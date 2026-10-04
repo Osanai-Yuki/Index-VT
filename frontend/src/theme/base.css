@@ -123,6 +123,25 @@ body {
   animation: suj-shimmer 1200ms ease-in-out infinite alternate;
 }
 
+/* ── 浮层入场（DESIGN.md §5.9）────────────────────────────────
+   Popover：translateY(4px) + opacity，180ms（--suj-dur-quick）。
+   reduced-motion 全局降级块会把它压到瞬时完成（both 填充终态可见），
+   无需在组件里散落判断。Modal/Drawer/Toast 的入场在各自 Task 追加。 */
+@keyframes suj-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.enter-pop {
+  animation: suj-pop-in var(--suj-dur-quick) var(--suj-ease-signature) both;
+}
+
 /* ── 滚动条（WebView2 = Chromium，用 -webkit- 前缀即可）────────── */
 ::-webkit-scrollbar {
   width: 10px;

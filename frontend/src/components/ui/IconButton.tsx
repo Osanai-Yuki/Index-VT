@@ -1,8 +1,9 @@
 // IconButton —— DESIGN.md §5.1（图标按钮：正方形 = 高度，必须带 aria-label 与 tooltip）
-// label 同时作为 aria-label 与 title（Tooltip 原语在 Task 2.7 落地后替换 title，
-// 交付前在报告中记一条待替换项）。
+// Task 2.7 起 tooltip 由 Tooltip 原语承担（hover + 键盘聚焦均可触发），
+// 不再依赖原生 title（原生 title 无键盘可达性且延迟不可控）。
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { Spinner } from './Spinner'
+import { Tooltip } from './Tooltip'
 
 export type ButtonSize = 'sm' | 'md' | 'lg'
 
@@ -40,16 +41,17 @@ export function IconButton({
   ].join(' ')
 
   return (
-    <button
-      type={type ?? 'button'}
-      className={cls}
-      aria-label={label}
-      title={label}
-      disabled={disabled || loading}
-      aria-busy={loading || undefined}
-      {...rest}
-    >
-      {loading ? <Spinner /> : icon}
-    </button>
+    <Tooltip content={label}>
+      <button
+        type={type ?? 'button'}
+        className={cls}
+        aria-label={label}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
+        {...rest}
+      >
+        {loading ? <Spinner /> : icon}
+      </button>
+    </Tooltip>
   )
 }

@@ -4,7 +4,7 @@
 // 焦点环由 base.css 的 :focus-visible 统一提供（组件内不得移除/覆盖焦点环）。
 // label 必填（12px/500 --ink-2 置于控件上方，杜绝 placeholder-only）；
 // 错误态：1px --danger + 下方 12px --danger 文案（带图标）+ aria-invalid/describedby。
-import { useId } from 'react'
+import { forwardRef, useId } from 'react'
 import type { InputHTMLAttributes, ReactNode } from 'react'
 import { CircleAlert } from 'lucide-react'
 
@@ -16,7 +16,11 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   size?: 'sm' | 'md'
 }
 
-export function Field({ label, error, hint, size = 'md', className, id, ...rest }: FieldProps) {
+/** forwardRef：LangPicker 搜索框聚焦、Modal 初始焦点等需要拿到真实 input */
+export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
+  { label, error, hint, size = 'md', className, id, ...rest },
+  ref,
+) {
   const autoId = useId()
   const inputId = id ?? autoId
   const errId = error ? `${inputId}-err` : undefined
@@ -28,6 +32,7 @@ export function Field({ label, error, hint, size = 'md', className, id, ...rest 
         {label}
       </label>
       <input
+        ref={ref}
         id={inputId}
         aria-invalid={error ? true : undefined}
         aria-describedby={errId ?? hintId}
@@ -49,4 +54,4 @@ export function Field({ label, error, hint, size = 'md', className, id, ...rest 
       )}
     </div>
   )
-}
+})
