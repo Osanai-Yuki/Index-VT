@@ -822,8 +822,14 @@ func openExplorer(dir string) error {
 }
 
 // CollectLogs 一键打包日志（zip 日志 + 脱敏配置，02 文档 §9 / F-24）。
+// 返回值为 zip 路径 + 说明文案，前端（Settings.tsx）直接展示该字符串。
+// 推理日志 llama-server.out.log 默认不打包 —— 可能含提示词原文（logs.go 排除表）。
 func (a *App) CollectLogs() (string, error) {
-	return a.collectLogsZip()
+	p, err := a.collectLogsZip()
+	if err != nil {
+		return "", err
+	}
+	return p + "（未包含推理日志）", nil
 }
 
 // PrepareExit 退出释放编排（01 文档 §7.1 应用组）。
