@@ -241,7 +241,22 @@ func mapNameToID(ggufName, filename string) ModelID {
 // ---------- List ----------
 
 // List 模型中心列表：三模型档案 + 未知文件。
+//
+// 锁不变量（02 文档 §6.1 锁序 / spec §7，缺陷 B13）：**绝不持 m.mu 调用任何
+// m.orch.***。声明顺序是 opMu → m.mu，而 orchestrator.setState 在持 opMu 期间会
+// 回调 OnEvent → app.go → Manager.MarkRan 取 m.mu；本函数若反向取（m.mu → opMu）
+// 即构成 AB-BA 死锁。故编排态一律先在锁外读成快照，锁内只做纯计算。
 func (m *Manager) List() []ModelInfo {
+	// 编排态快照（锁外）。端口/空闲秒数仅在 running 时才用到，与旧实现的
+	// 惰性取值条件一致，避免无谓地再取一次 opMu。
+	orchState := m.orch.State()
+	curModel := m.orch.CurrentModel()
+	var orchPort, orchIdleSec int
+	if orchState == "running" && curModel != "" {
+		orchPort = m.orch.EndpointPort()
+		orchIdleSec = m.orch.IdleSeconds()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	recs, _ := m.store.ListModelFiles()
@@ -249,8 +264,6 @@ func (m *Manager) List() []ModelInfo {
 	for _, r := range recs {
 		byModel[r.ModelID] = append(byModel[r.ModelID], r)
 	}
-	orchState := m.orch.State()
-	curModel := m.orch.CurrentModel()
 	var out []ModelInfo
 	for _, spec := range Registry {
 		mi := ModelInfo{
@@ -287,8 +300,8 @@ func (m *Manager) List() []ModelInfo {
 			switch orchState {
 			case "running":
 				mi.State = StateRunning
-				mi.Port = m.orch.EndpointPort()
-				mi.IdleSec = m.orch.IdleSeconds()
+				mi.Port = orchPort
+				mi.IdleSec = orchIdleSec
 			case "starting":
 				mi.State = StateLoading
 			case "stopping":
