@@ -156,6 +156,11 @@ func (s *Store) ListHistory(page, pageSize int, starredOnly bool) ([]HistoryItem
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 50
 	}
+	// int64 计算，避免 (page-1)*pageSize 在 32 位溢出下变成负 OFFSET（B21）
+	offset := int64(page-1) * int64(pageSize)
+	if offset < 0 || offset > 1<<40 {
+		offset, page = 0, 1
+	}
 	q := `SELECT id, created_at, source_lang, target_lang, source_text, output, model, mode, starred
 		FROM history`
 	args := []any{}
@@ -163,7 +168,7 @@ func (s *Store) ListHistory(page, pageSize int, starredOnly bool) ([]HistoryItem
 		q += ` WHERE starred = 1`
 	}
 	q += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
-	args = append(args, pageSize, (page-1)*pageSize)
+	args = append(args, pageSize, offset)
 	return s.queryHistory(q, args...)
 }
 
@@ -285,10 +290,16 @@ func (s *Store) glossaryItems(id int64) ([]GlossaryItemEnt, error) {
 	return items, rows.Err()
 }
 
-// SaveGlossary id=0 新建；否则整体替换。
+// SaveGlossary id=0 新建；否则整体替换。全部语句在同一事务内，失败即整体回滚。
 func (s *Store) SaveGlossary(g Glossary) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }() // Commit 成功后 Rollback 返回 ErrTxDone，忽略即可
+
 	if g.ID == 0 {
-		res, err := s.db.Exec(`INSERT INTO glossaries(name) VALUES(?)`, g.Name)
+		res, err := tx.Exec(`INSERT INTO glossaries(name) VALUES(?)`, g.Name)
 		if err != nil {
 			return 0, err
 		}
@@ -297,10 +308,10 @@ func (s *Store) SaveGlossary(g Glossary) (int64, error) {
 			return 0, err
 		}
 	} else {
-		if _, err := s.db.Exec(`UPDATE glossaries SET name = ? WHERE id = ?`, g.Name, g.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE glossaries SET name = ? WHERE id = ?`, g.Name, g.ID); err != nil {
 			return 0, err
 		}
-		if _, err := s.db.Exec(`DELETE FROM glossary_items WHERE glossary_id = ?`, g.ID); err != nil {
+		if _, err := tx.Exec(`DELETE FROM glossary_items WHERE glossary_id = ?`, g.ID); err != nil {
 			return 0, err
 		}
 	}
@@ -308,10 +319,13 @@ func (s *Store) SaveGlossary(g Glossary) (int64, error) {
 		if it.Term == "" {
 			continue
 		}
-		if _, err := s.db.Exec(`INSERT INTO glossary_items(glossary_id, term, translation) VALUES(?,?,?)`,
+		if _, err := tx.Exec(`INSERT INTO glossary_items(glossary_id, term, translation) VALUES(?,?,?)`,
 			g.ID, it.Term, it.Translation); err != nil {
 			return 0, err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
 	return g.ID, nil
 }
