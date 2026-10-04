@@ -280,7 +280,8 @@ func (e *Engine) RetryCues(docID string, cueIdx []int, opt QueueOptions, onProgr
 		for j := range doc.Cues {
 			if doc.Cues[j].Index == i {
 				doc.Cues[j].State = CuePending
-				doc.Cues[j].Translated = ""
+				// 不清空 Translated：重译失败时用户仍能看到上一版结果（B5）。
+				// 成功路径会覆写译文，预先清空只会让失败的重译永久丢失已有结果。
 			}
 		}
 	}

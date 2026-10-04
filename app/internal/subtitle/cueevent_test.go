@@ -312,3 +312,43 @@ func TestQueueCoalescesNonTerminalEvents(t *testing.T) {
 		t.Fatalf("退出补发事件计数/DocID 错误: %+v", last)
 	}
 }
+
+// ============================================================================
+// Task 1.10：重译不清空译文（B5）。helper 在 testhelpers_test.go，勿重复定义。
+// ============================================================================
+
+// 重译失败时原有译文必须保留（B5）。旧实现先清空再重译，失败即永久丢失。
+func TestRetryCuesKeepsOldTranslationOnFailure(t *testing.T) {
+	var shouldFail bool
+	e := NewEngine(func(ctx context.Context, text, src, dst string) (string, error) {
+		if shouldFail {
+			return "", context.DeadlineExceeded
+		}
+		return "第一次", nil
+	})
+	doc := newDocForTest(2)
+	e.mu.Lock()
+	e.docs[doc.ID] = doc
+	e.mu.Unlock()
+
+	if err := e.TranslateQueue(doc.ID, QueueOptions{TargetLang: "zh"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueDone(t, e, doc.ID)
+	if doc.Cues[0].Translated != "第一次" {
+		t.Fatalf("前置条件不成立：%q", doc.Cues[0].Translated)
+	}
+
+	shouldFail = true
+	if err := e.RetryCues(doc.ID, []int{1}, QueueOptions{TargetLang: "zh"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitQueueDone(t, e, doc.ID)
+
+	if doc.Cues[0].Translated != "第一次" {
+		t.Fatalf("重译失败导致原译文丢失：%q（用户会永久失去这行结果）", doc.Cues[0].Translated)
+	}
+	if doc.Cues[0].State != CueFailed {
+		t.Fatalf("状态应为 failed，实际 %v", doc.Cues[0].State)
+	}
+}

@@ -739,6 +739,15 @@ func (a *App) SubRetryCues(docID string, ids []int, opt subtitle.QueueOptions) e
 	})
 }
 
+// SubGetDoc 返回文档权威快照。用于：队列结束后一次性校准、事件丢包兜底、
+// 以及 cue 表滚动到未订阅区间时的补全。
+func (a *App) SubGetDoc(docID string) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.GetDoc(docID)
+}
+
 // SubExport 导出（弹出保存对话框）。
 func (a *App) SubExport(docID string, opt subtitle.ExportOptions) error {
 	if err := a.ensureReady(); err != nil {
