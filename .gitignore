@@ -1,0 +1,25 @@
+# 依赖与构建产物
+frontend/node_modules/
+frontend/dist/
+frontend/package.json.md5
+app/frontenddist/
+app/build/bin/
+
+# 大二进制与模型（thirdparty ~2.9G + models ~1.3G）
+thirdparty/
+models/
+*.gguf
+*.dll
+*.exe
+
+# 运行时产物
+logs/
+.smoke/
+.playwright-mcp/
+.tmp-*
+*.log
+
+# 工具私有目录（属用户资产：不纳入版本控制，也不删除文件）
+.mimosa/
+.archcore/
+.trae/

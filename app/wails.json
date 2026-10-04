@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Index-VT",
+  "outputfilename": "Index-VT",
+  "frontend:dir": "../frontend",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Index-VT"
+  },
+  "info": {
+    "productName": "Index-VT",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2026",
+    "comments": "全本地 AI 桌面翻译工具"
+  }
+}

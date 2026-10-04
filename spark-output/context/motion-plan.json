@@ -1,0 +1,208 @@
+{
+  "skill": "motion-plan",
+  "generated_at": "2026-10-04T20:07:10+08:00",
+  "project_name": "Index-VT",
+  "scope": {
+    "target_pages": [
+      "翻译台（主双栏读写）",
+      "字幕工作台（cue 表 + 队列）",
+      "模型中心（卡片 + 下载）",
+      "术语本（列表 + 词条表）",
+      "设置",
+      "首次引导（非阻塞覆盖层）",
+      "命令面板（Ctrl+K）",
+      "浮层家族（modal / drawer / popover / toast / tooltip）"
+    ],
+    "target_elements": [
+      "页面切换",
+      "流式译文输出（hero）",
+      "按钮按下",
+      "状态徽标切换",
+      "抽屉（约束抽屉 / 详情抽屉）",
+      "模态确认框",
+      "语言选择弹层",
+      "Toast 通知",
+      "Skeleton 骨架",
+      "下载进度条",
+      "队列进度条",
+      "Rail 激活指示",
+      "cue 行选中",
+      "模型卡入场",
+      "引导步骤推进",
+      "空态"
+    ]
+  },
+  "personality": {
+    "archetype": "Premium",
+    "source": "user-input",
+    "rationale": "用户在 motion-plan Phase 2 的 AskUserQuestion 中显式选定 Premium（红线要求：绝不静默选）。推导依据：设计概念「素笺」要求界面近乎无色、留白承担层级，动效必须同样克制——同一时刻只允许一个元素在动。产品是长时间阅读与校对的专业工具（双栏对照长文本、上千行 cue 表），Playful 的 overshoot 与 Energetic 的快节奏会和阅读态冲突；Corporate 虽适合高频数据操作，但其 dashboard 气质与「纸感」人格相左。Premium 的 0% overshoot + (0.4,0,0.2,1) 缓动同时满足「优雅极简」与「不干扰阅读」。为兼顾工具跟手感，duration palette 取 Premium 区间的快端（180/320/520）而非默认的 350-600。"
+  },
+  "brand_motion_identity": {
+    "signature_easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+    "duration_palette": {
+      "quick": 180,
+      "standard": 320,
+      "slow": 520
+    },
+    "entrance_pattern": "translateY(8px) + opacity 0→1，单一签名缓动，无 scale、无弹性、无 overshoot。位移距离恒为 8px（不随元素尺寸缩放），保证全站入场手感一致。"
+  },
+  "element_specs": [
+    {
+      "element": "流式译文输出（hero）",
+      "property": "multi",
+      "duration_ms": 320,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Staging", "Slow In and Slow Out", "Secondary Action"],
+      "visual_description": "三层动效齐备。【Primary 100%】译文文本按后端 delta 到达即渲染，字符本身不做逐字动画——数据流驱动，不额外编排；末尾 2px 钢笔蓝光标以 1000ms steps(1) 闪烁，是全应用唯一的持续动效。【Secondary 40%】输出区右上角的指标徽标（tok/s · TTFT）在 translate:done 时以 opacity+translateY(4px) 320ms 淡入，比最后一个字符晚 100ms，像校对者放下笔后才写下批注。【Ambient 15%】译文栏顶部一道 1px 的 accent 细线在流式期间保持 8% 不透明度、结束后 520ms 淡出到 0，用余光传达「仍在生成」而不抢占阅读注意力。Staging 体现为：流式期间历史侧栏与约束抽屉静止不动，不产生任何并发位移。"
+    },
+    {
+      "element": "页面切换",
+      "property": "multi",
+      "duration_ms": 520,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 60,
+      "disney_principles": ["Staging", "Follow Through", "Slow In and Slow Out"],
+      "visual_description": "唯一的编舞时刻。旧页不留反向位移，直接 opacity 1→0 于 120ms（ease-in，退出短于入场，符合「入场比退出长 30-50%」）。新页整体 translateY(8px)+opacity 入场 520ms；页内一级区块（面板级，非行级）以 60ms stagger 跟随，最多 4 个区块 → stagger 总计 180ms，远低于 500ms 预算。Follow Through 体现在区块比页面容器晚 60ms 落位，形成轻微拖尾而非整体硬切。"
+    },
+    {
+      "element": "按钮按下",
+      "property": "scale",
+      "duration_ms": 120,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Squash and Stretch", "Slow In and Slow Out"],
+      "visual_description": "press 时 scale 1→0.98（120ms），release 直接回 1.0（180ms，签名缓动），**无 overshoot 回弹**——Premium 明确跳过夸张的 squash & stretch，只保留 2% 的极轻微压缩作为触感确认。背景色变化与 scale 同时进行（color 属次要属性，不单独编排）。loading 态：前导图标位置换成 14px spinner，spinner 是全站唯一允许 linear 的动效。"
+    },
+    {
+      "element": "状态徽标切换（badge）",
+      "property": "color",
+      "duration_ms": 180,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Slow In and Slow Out"],
+      "visual_description": "只过渡 background-color 与 color（soft 底 + 语义色文字），180ms。**不做 scale、不做弹跳**——徽标是状态读数，跳动会让用户在密集表格里误判。文字标签同时替换，因为状态不允许仅靠颜色传达（a11y 契约第 4 条）。状态点（6px 圆点）在 running 态以 2000ms sine ease-in-out 做 opacity 0.5→1 的呼吸，这是 ambient 层，幅度 15%，不位移。"
+    },
+    {
+      "element": "抽屉（约束抽屉 / cue 详情抽屉）",
+      "property": "multi",
+      "duration_ms": 320,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Staging", "Secondary Action", "Slow In and Slow Out"],
+      "visual_description": "入场 translateX(16px)→0 + opacity，320ms；退场 translateX(0)→8px + opacity，240ms（退出位移减半、时长更短，符合方向性缓动规则）。Scrim 独立 fade 200ms。Secondary Action：抽屉内首个可聚焦元素在容器落位后 80ms 获得焦点（焦点环 180ms 淡入），把注意力交还给键盘用户。Staging：抽屉打开时背后主内容**不做**变暗以外的任何变化，不移位、不缩放。"
+    },
+    {
+      "element": "模态确认框",
+      "property": "multi",
+      "duration_ms": 320,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Staging", "Slow In and Slow Out"],
+      "visual_description": "入场 translateY(8px)+opacity 320ms，scrim fade 200ms 同时开始。退场 240ms，位移 4px。**不使用 scale 弹出**（旧式 modal 的 scale 0.96→1 在 Premium 下显得廉价）。用于替换全部 8 处 alert()/confirm()：破坏性操作（删除模型、清空历史）的确认按钮为 danger 变体，且默认焦点落在**取消**上，避免回车误删。"
+    },
+    {
+      "element": "语言选择弹层（LangPicker popover）",
+      "property": "multi",
+      "duration_ms": 180,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Anticipation", "Slow In and Slow Out"],
+      "visual_description": "入场 translateY(4px)+opacity 180ms（quick 档——弹层必须感觉即时）；退场 140ms，位移 2px。Anticipation 体现为触发器在弹层出现前 60ms 先切到 hover 态边框（--line-strong），暗示「即将展开」。列表项**不做 stagger**：150 个语言项逐个入场会拖到不可用，改为整体一次淡入。搜索过滤时结果集直接替换，不加过渡（避免每次键入都触发动画）。"
+    },
+    {
+      "element": "Toast 通知",
+      "property": "multi",
+      "duration_ms": 280,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 80,
+      "disney_principles": ["Follow Through", "Staging", "Slow In and Slow Out"],
+      "visual_description": "入场 translateY(8px)+opacity 280ms；退场 opacity 200ms + translateY(4px)。多条堆叠时新 toast 从底部进入，已有 toast 以 280ms 上移让位（transform，不动 height，避免布局抖动），最多同屏 3 条，超出的直接替换最旧一条。Follow Through：图标比文字早 60ms 到位。error 类不自动消失；其余 4s 后自动退场，hover 时暂停计时。"
+    },
+    {
+      "element": "Skeleton 骨架",
+      "property": "opacity",
+      "duration_ms": 1200,
+      "easing": "cubic-bezier(0.45, 0, 0.55, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Slow In and Slow Out"],
+      "visual_description": "opacity 0.6→1→0.6 循环，sine ease-in-out，1200ms。**不用 transform 位移做 shimmer 扫光**——位移会与真实内容入场争抢注意力，且在千行表格里造成大面积重绘。骨架只在任务区出现，禁止整页遮罩。真实数据到达时骨架以 180ms opacity 淡出，内容同时淡入，不做交叉位移。"
+    },
+    {
+      "element": "下载进度条",
+      "property": "scale",
+      "duration_ms": 320,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Slow In and Slow Out"],
+      "visual_description": "6px 高、radius full 的轨道（--sunken），填充用 transform: scaleX() 而非 width（GPU 友好、避免每帧布局）。进度更新以 320ms 签名缓动插值，把后端不规则的字节回调抹平成连续推进；**填充本身不用 linear**（linear 只允许于 spinner）。完成时填充色从 --warn 过渡到 --ok（180ms），并在 320ms 后整条淡出为高度 0 的间距（用 opacity + scaleY，不动 layout）。速度/百分比文字用 tabular-nums，不随数字宽度抖动。"
+    },
+    {
+      "element": "队列进度条（字幕批量翻译）",
+      "property": "scale",
+      "duration_ms": 320,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Slow In and Slow Out", "Staging"],
+      "visual_description": "同下载条的 scaleX 手法，但语义色为 --ok（完成量）。工具栏上的「N / M」计数与进度条同步，数字变化不做滚动动画（tabular-nums 已消除抖动，滚动数字在长队列里会变成持续干扰）。Staging：队列运行期间，cue 表的行状态徽标按 180ms color 过渡逐条更新，但**行本身永不位移、永不入场动画**——即使一次批量重译 800 行。"
+    },
+    {
+      "element": "Rail 激活指示",
+      "property": "multi",
+      "duration_ms": 180,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Follow Through", "Slow In and Slow Out"],
+      "visual_description": "激活项的 2px 左缘 accent 竖条用 transform: scaleY(0.4)→scaleY(1) + opacity 180ms 展开（transform-origin: center），图标颜色 180ms 过渡到 --ink-1，底色 --sunken 同步淡入。Follow Through：竖条比图标颜色晚 40ms 完成，形成「先落位、后描边」的次序感。任务指示点（6px --ok）在有进行中任务时以 2000ms sine 呼吸（ambient 层）。**不做**滑块在 rail 上跨项滑动——那需要绝对定位共享指示器，且跨项长位移违反 1/3 屏规则。"
+    },
+    {
+      "element": "cue 行选中",
+      "property": "multi",
+      "duration_ms": 180,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Slow In and Slow Out"],
+      "visual_description": "选中行：左缘 2px accent 条以 scaleY 180ms 展开 + 行底色淡入 --accent-soft；右侧详情面板内容以 translateY(8px)+opacity 320ms 换入（旧内容 120ms 淡出）。**行本身不位移、不缩放**——在虚拟滚动表格里对行做 transform 会与滚动位置计算冲突并造成撕裂。键盘 ↑↓ 移动选中时，同一套 180ms 过渡保证连续按键不会堆积动画（新动画立即接管当前值）。"
+    },
+    {
+      "element": "模型卡入场",
+      "property": "multi",
+      "duration_ms": 320,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 100,
+      "disney_principles": ["Follow Through", "Staging", "Slow In and Slow Out"],
+      "visual_description": "translateY(8px)+opacity 320ms，三张卡以 100ms stagger 依次落位（总预算 200ms ≤ 500ms）。Follow Through：卡内指标徽标比卡片容器晚 80ms 淡入。Staging：入场期间 VRAM 概览条保持静止。**只在首次进入模型中心时播放一次**——从其他页返回、下载进度刷新、状态轮询（5s 一次）都不得重放入场动画。旧实现把 screen-in 同时挂在容器和每张卡上，导致每次 re-render 双重动画。"
+    },
+    {
+      "element": "引导步骤推进",
+      "property": "multi",
+      "duration_ms": 320,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 0,
+      "disney_principles": ["Anticipation", "Follow Through", "Slow In and Slow Out"],
+      "visual_description": "步骤条上完成的步骤：圆圈底色 180ms 过渡到 --ok-soft、数字 180ms 交叉淡入为对勾（opacity 双向，不用 scale 弹出）。当前步骤内容区 translateY(8px)+opacity 320ms 换入。Anticipation：下一步按钮在可点击前先以 180ms 从 disabled(opacity .45) 过渡到可用态，提示「可以走了」。引导覆盖层本身**不阻塞**：关闭时 240ms 淡出，主界面已在底下就位（不做遮罩揭示动画）。"
+    },
+    {
+      "element": "空态",
+      "property": "multi",
+      "duration_ms": 520,
+      "easing": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "stagger_ms": 80,
+      "disney_principles": ["Staging", "Follow Through", "Slow In and Slow Out"],
+      "visual_description": "三段慢入（slow 档 520ms，全应用最慢，因为空态是唯一允许「优雅」的时刻）：图标 opacity+translateY(8px) → 标题（延迟 80ms）→ 正文与主操作（延迟 160ms）。stagger 总计 160ms。**不使用点阵网格背景动画**（v1.0 签名细节已废弃，留白即装饰）。图标不做任何持续动效——空态应当安静。"
+    }
+  ],
+  "choreography": {
+    "stagger_budget_ms": 300,
+    "counter_motion": "刻意不使用对抗运动。Premium + 「素笺」概念要求画面安静：页面切换时旧页直接淡出（120ms），不做反向位移；抽屉/模态打开时背后内容除 scrim 变暗外完全静止，不做视差或反向漂移。唯一被保留的「让位」运动是 Toast 堆叠时已有条目向上平移 280ms（transform，不动 height），因为那是为新元素腾出空间的必要位移，而非装饰性对抗。1/3 屏规则天然满足：全站最大单次位移为抽屉的 16px。"
+  },
+  "reduced_motion_fallback": {
+    "strategy": "在 :root 之外的单一 @media (prefers-reduced-motion: reduce) 块内统一降级，覆盖全部 16 条 element_specs（旧实现只覆盖 .screen-in 与 .caret 两个选择器，其余 transition 全漏网，本版作为可验证契约）：① 移除所有 transform 位移与缩放（translate/scale 归零），仅保留 opacity 过渡；② opacity 过渡时长减半（520→260 / 320→160 / 180→90 / 120→60）；③ 所有 stagger 归零，多元素同时淡入；④ 停止全部无限循环动效——流式光标改为常亮不闪烁的 2px 竖条（保留「仍在生成」的信息，不靠动画传达）、状态点呼吸与 skeleton shimmer 停止（skeleton 改为静态 --sunken 块）；⑤ 进度条填充改为无过渡直接跳变（信息本身仍连续更新）；⑥ spinner 保留旋转但降速至 1600ms/圈（加载指示是必要反馈，完全移除会让用户以为卡死）。实现约束：降级规则必须写在 tokens.css 的单一媒体查询内，禁止在各组件里散落 prefers-reduced-motion 判断，否则新增动效必然漏网。"
+  },
+  "open_questions": [
+    "译文阅读区是否提供「衬线阅读模式」开关（仅译文栏切 CJK 衬线系统字体）？衬线在 15.5px+ 下能提升长文阅读质感，但 Windows SimSun 小字号发虚，且中英混排时拉丁衬线与 CJK 衬线难以配对。当前决定：默认无衬线，不实现该开关，Phase 2 再评估。",
+    "命令面板（Ctrl+K）是否需要独立的入场动效规格？当前沿用 popover 的 quick 档（translateY(4px)+opacity 180ms），但面板尺寸更大（宽 560），按「距离缩放时长」规则可能应取 standard 档 320ms。待实现后在真实尺寸下目测确认。",
+    "下载/队列进度条完成后的「淡出为间距」会改变布局高度，可能引起卡片内容跳动。若实测跳动明显，改为保留轨道仅将填充淡出（不收回高度）。",
+    "深色主题下 --e-2/--e-3 阴影几乎不可见，浮层改靠 1px --line-strong 描边分层。描边是否需要在浅色主题下也保留以求两主题一致？当前决定：浅色仅阴影、深色仅描边，各自最优。"
+  ]
+}
