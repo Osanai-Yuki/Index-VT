@@ -11,6 +11,9 @@
     "verify:wails": "node scripts/verify-wails.mjs",
     "verify:lib": "node scripts/verify-lib.mjs",
     "verify:datatable": "node scripts/verify-datatable.mjs",
+    "verify:contrast": "node scripts/verify-contrast.mjs",
+    "verify:keyboard": "node scripts/verify-keyboard.mjs",
+    "verify:all": "npm run lint:design && tsc --noEmit && npm run verify:theme && npm run verify:wails && npm run verify:lib && npm run verify:a11y -- \"/?primitives\" 1180,1366,1680 light,dark && npm run verify:datatable && npm run verify:contrast && npm run verify:keyboard",
     "build": "npm run lint:design && tsc --noEmit && vite build",
     "preview": "vite preview"
   },
