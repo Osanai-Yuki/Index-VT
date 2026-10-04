@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // ModeKind 翻译模式（ADR-004：Normal→Translate-2B，Dubbing→Homura-2B）。
@@ -42,6 +44,13 @@ type TranslateResult struct {
 
 // ErrCanceled 任务被取消。
 var ErrCanceled = errors.New("已取消")
+
+// ErrFirstTokenTimeout 首字节看门狗：模型已连接但迟迟不产出首个增量，请求被主动中止。
+var ErrFirstTokenTimeout = errors.New("模型未在预期时间内返回首字")
+
+// firstTokenTimeout 首字节看门狗：模型已连接但迟迟不出字时中止，避免界面无限等。
+// 是 var 而非 const —— 测试需要把它压到毫秒级。
+var firstTokenTimeout = 60 * time.Second
 
 // OrchestratorView translator 感知编排所需的最小接口。
 type OrchestratorView interface {
@@ -128,9 +137,36 @@ func (t *Translator) Translate(ctx context.Context, req TranslateRequest, onDelt
 
 	client := newChatClient(baseURL)
 	var result StreamResult
+	// 首字节看门狗：连接已建立但 runCtx 上迟迟没有首个增量时，主动取消 runCtx，
+	// 让阻塞在 ReadByte 的流循环解锁。只约束「等首字」；流本身仍不限时
+	//（http.Client.Timeout 保持 0，整体合法时可跑数分钟）。
+	// firstDeltaSettled 由看门狗与首个 onDelta 通过同一 CAS 互斥认领：
+	// 谁先认领谁赢，避免恰好压线时两边同时动作。
+	var firstDeltaSettled atomic.Bool
+	var watchdogFired atomic.Bool
+	watchdog := time.AfterFunc(firstTokenTimeout, func() {
+		if !firstDeltaSettled.CompareAndSwap(false, true) {
+			return // 首字已到：看门狗不再生效
+		}
+		watchdogFired.Store(true)
+		cancel()
+	})
+	defer watchdog.Stop()
+	onFirstDelta := func(delta string) {
+		if firstDeltaSettled.CompareAndSwap(false, true) {
+			watchdog.Stop() // 首字到达即停表
+		}
+		if onDelta != nil {
+			onDelta(delta)
+		}
+	}
 	// 模型唤醒/加载中在此阻塞（EnsureRunning 语义），UI 前置显示"模型唤醒中"
-	result, err = client.ChatStream(runCtx, httpReq, onDelta)
+	result, err = client.ChatStream(runCtx, httpReq, onFirstDelta)
 	if err != nil {
+		if watchdogFired.Load() {
+			// 与用户取消区分：runCtx 是被看门狗取消的
+			return TranslateResult{Output: result.Text}, fmt.Errorf("%w（%v 内无首个增量）", ErrFirstTokenTimeout, firstTokenTimeout)
+		}
 		if runCtx.Err() != nil || ctx.Err() != nil {
 			return TranslateResult{Output: result.Text}, ErrCanceled
 		}
