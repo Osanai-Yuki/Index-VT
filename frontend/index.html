@@ -3,7 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>Index-VT</title>
+  <script>
+    /* 首帧前主题解析（DESIGN.md §9）——消除深色主题启动白闪。
+       CSS 由 JS 模块注入，晚于首帧，所以必须在 head 内联一次兜底底色。
+       默认 light：Wails 侧 options.App.BackgroundColour 已由后端 Track 设为浅色画布 #FBFBFA，
+       只有「存储档位是 dark」或「档位为 system 且系统偏好深色」时才切暗。
+       禁止在此引入任何外链资源（本应用离线运行，DESIGN.md §3.1）。
+       注意：'indexvt.theme' 与 src/theme/theme.ts 的 THEME_STORAGE_KEY 必须逐字一致。 */
+    (function () {
+      var root = document.documentElement;
+      var dark = false;
+      try {
+        var mode = localStorage.getItem('indexvt.theme');
+        if (mode === 'dark') {
+          dark = true;
+        } else if (mode !== 'light') {
+          dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        }
+      } catch (e) {
+        /* localStorage 不可用（存储被禁）→ 保持 light */
+      }
+      root.setAttribute('data-theme', dark ? 'dark' : 'light');
+      root.style.backgroundColor = dark ? '#131312' : '#FBFBFA';
+    })();
+  </script>
 </head>
 <body>
   <div id="root"></div>

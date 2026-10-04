@@ -62,12 +62,14 @@
   --color-warn-soft: var(--warn-soft);
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
-  --radius-s: var(--radius-s);
-  --radius-m: var(--radius-m);
-  --radius-l: var(--radius-l);
-  --font-mono: var(--font-mono);
-  --font-latin: var(--font-latin);
-  --font-cjk: var(--font-cjk);
+  /* R29（2026-10-04，Task 2.1）：此处原有六行
+       --radius-s: var(--radius-s);  --radius-m: var(--radius-m);  --radius-l: var(--radius-l);
+       --font-mono: var(--font-mono); --font-latin: var(--font-latin); --font-cjk: var(--font-cjk);
+     已删除。它们是同名自引用（--x: var(--x)）——CSS 变量成环即 guaranteed-invalid，
+     而且写入的正是新 token 层（src/theme/tokens.css）要用的 Tailwind 主题命名空间：
+     若旧文件在 cascade 中胜出，`font-mono` utility 会静默退化，时间码 / 指标 / .num / 表头全部受影响。
+     上方 :root 里的 --radius-* / --font-* 字面值保留不动（它们是无害的原始自定义属性）。
+     本文件其余部分（含 --color-* 映射）不得改动：现存 6 个页面有 203 处旧 utility 依赖它，Track C 才整体删除。 */
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

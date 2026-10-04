@@ -1,0 +1,242 @@
+/* ============================================================
+   素笺 (Blank Sheet) — 语义 token 层 · v2.0
+   ------------------------------------------------------------
+   权威来源：docs/03-GUI设计图/DESIGN.md §2（色彩）§3（字体）§4（几何）
+   本文件的色值/字号/圆角一律逐字抄写，禁止四舍五入或"改良"：
+   DESIGN.md §2.3 的对比度（light 17.4/7.5/5.1、dark 14.7/7.3/4.8）是对这些
+   字面值实算出来的，改动任何一个数字都会让 ≥4.5:1 的硬约束失去依据。
+
+   ── 结构（顺序不可颠倒）────────────────────────────────
+   1) light token（:root 与 [data-theme="light"]，设计基准）
+   2) dark token（同一套语义名换值，不是第二套设计）
+   3) 主题无关几何（高度 / z 序）
+   4) @theme        —— 几何与字体：给**字面值**
+   5) @theme inline —— 颜色：给**异名变量引用**
+   6) 层叠兜底 —— --font-mono 的非分层重申（见该处注释）
+
+   ── 为什么 @theme 与 @theme inline 分工不同 ──────────────
+   · 几何/字体（--radius-* / --font-* / --text-*）不随主题切换，
+     在 @theme 内直接写字面值即可；写成 `--radius-sm: var(--radius-sm)`
+     是同名自引用 = CSS 变量成环 = guaranteed-invalid（旧 styles/tokens.css
+     的真实 bug，已由 R29 删除，本层禁止复现）。
+   · 颜色必须随 <html data-theme> 切换，所以语义值定义在 :root / [data-theme="dark"]
+     的**普通规则**里（--canvas / --ink-1 …），再用 @theme inline 把 Tailwind
+     命名空间的 --color-* 映射过去。`inline` 让 utility 直接内联 var(--canvas)
+     而不是 var(--color-canvas)，主题切换才会实时生效；且 --color-canvas 与
+     --canvas **不同名**，不成环。
+
+   ── 字体栈纪律（DESIGN.md §3.2，旧实现的真 bug）──────────
+   `--font-app` / `--font-mono` 各自必须是**单一栈**，CJK 字体排在通用族
+   （system-ui / sans-serif / monospace）**之前**。旧实现写成
+   `font-family: var(--font-latin), var(--font-cjk)`，展开后 `sans-serif`
+   位于 CJK 栈之前——按 CSS 字体匹配规则命中通用族即停止，中文字体永不可达。
+   禁止把字体栈拆成多个变量再拼接。
+   ============================================================ */
+@import "tailwindcss";
+
+/* 契约 utility 白名单：本层产出的 utility 名是 Track B 后续所有 Task 与 Track C
+   的直接消费面。Tailwind v4 会 tree-shake 未被源码引用的 theme 变量，而 2.1 阶段
+   还没有任何组件引用它们（陈列页在 2.5 才出现），因此在此显式声明为"已使用"，
+   保证 ① utility 一定生成、② 对应的 --radius-* / --text-* / --font-* 变量一定
+   落到 :root（scripts/verify-theme.mjs 依赖这点），③ 后续动态拼接的类名不被误删。 */
+@source inline("bg-canvas bg-surface bg-sunken bg-raised bg-scrim border-line border-lineStrong text-ink1 text-ink2 text-ink3 text-inkInverse bg-primary text-primary text-accent bg-accentSoft text-danger bg-dangerSoft text-warn bg-warnSoft text-ok bg-okSoft rounded-xs rounded-sm rounded-md rounded-lg rounded-full text-display text-title text-read text-body text-caption text-micro font-app font-mono");
+
+/* ── 1. light（设计基准）· DESIGN.md §2 ───────────────────────── */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* §2.1 表面 */
+  --canvas: #FBFBFA;      /* 应用底：1% 暖白，避开纯白眩光 */
+  --surface: #FFFFFF;     /* 面板/卡片/表格底 */
+  --sunken: #F4F4F2;      /* 输入框、时间码井、hover 行 */
+  --raised: #FFFFFF;      /* 浮层 popover/drawer/modal/toast */
+
+  /* §2.2 线（面板不使用任何线） */
+  --line: rgba(24, 24, 22, .10);
+  --line-strong: rgba(24, 24, 22, .18);
+
+  /* §2.3 文本 —— 对 --surface 对比度 17.4 / 7.5 / 5.1，三级全部过 AA */
+  --ink-1: #1A1A18;
+  --ink-2: #55554F;
+  --ink-3: #6E6E68;
+  --ink-inverse: #FBFBFA;
+
+  /* §2.4 交互色与语义色 */
+  --primary: #1A1A18;     /* 主按钮墨块实底，不带彩色 */
+  --accent: #2B4A8B;      /* 钢笔蓝 8.6:1 —— 只用于焦点环/链接/术语高亮/选中行左缘条/流式光标 */
+  --danger: #B42318;      /* 6.6:1 */
+  --warn: #8A6212;        /* 5.5:1 */
+  --ok: #2E6B4F;          /* 6.3:1 */
+
+  /* soft 底（badge 背景 / 选中行底）：light 8% */
+  --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 8%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 8%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) 8%, transparent);
+
+  /* §4.4 层级：--e-0 是面板默认（禁止给面板加阴影） */
+  --e-0: none;
+  --e-2: 0 1px 2px rgba(24, 24, 22, .06), 0 8px 24px rgba(24, 24, 22, .10);
+  --e-3: 0 2px 4px rgba(24, 24, 22, .08), 0 16px 48px rgba(24, 24, 22, .14);
+
+  /* §5.9 Scrim */
+  --scrim: rgba(24, 24, 22, .32);
+}
+
+/* ── 2. dark：同一套语义 token 换值，不是第二套设计 · DESIGN.md §2 dark 列 ──
+   选择器特异性与 :root 相同（均为 0,1,0），靠**源码顺序在后**取胜，
+   因此本块必须位于 light 块之后，禁止上移。 */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #131312;
+  --surface: #1A1A19;
+  --sunken: #101010;
+  --raised: #20201F;
+
+  --line: rgba(255, 255, 255, .10);
+  --line-strong: rgba(255, 255, 255, .20);
+
+  /* 对 --surface 对比度 14.7 / 7.3 / 4.8，三级全部过 AA */
+  --ink-1: #ECECEA;
+  --ink-2: #A8A8A2;
+  --ink-3: #87877F;
+  --ink-inverse: #131312;
+
+  --primary: #ECECEA;
+  --accent: #8AA6E8;      /* 7.2:1 */
+  --danger: #E4796E;      /* 6.0:1 */
+  --warn: #D9A441;        /* 7.7:1 */
+  --ok: #6FBF97;          /* 7.9:1 */
+
+  /* soft 底：dark 14%（深底上 8% 不足以成形） */
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 14%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 14%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) 14%, transparent);
+
+  /* §4.4：深色下阴影几乎不可见 → 浮层靠 1px --line-strong 描边分层，
+     用 box-shadow 环表达（组件因此不必在深色下额外写 border，布局不跳）。 */
+  --e-2: 0 0 0 1px var(--line-strong);
+  --e-3: 0 0 0 1px var(--line-strong);
+
+  --scrim: rgba(0, 0, 0, .55);
+}
+
+/* ── 3. 主题无关几何 · DESIGN.md §4.1 / §3.5 / §4.3 / §4.4 ────────
+   这些不随主题切换，也不能放进 @theme：`--h-*` / `--z-*` / `--measure-read`
+   不属于任何 Tailwind 命名空间，不会生成 utility，而 Tailwind v4 会把"未被
+   utility 引用"的 theme 变量从产物里 tree-shake 掉，运行时就读不到了。
+   放普通 :root 才是可靠的。
+   §4.1 的 4px 间距基线（4/8/12/16/24/32/48/64/96）由 Tailwind 默认
+   --spacing: .25rem 直接给出（p-1/p-2/p-3/p-4/p-6/p-8/p-12/p-16/p-24），无需另立 token。
+
+   命名说明：§4.3 的高度与 §4.4 的 z 序在 DESIGN.md 里有**字面值但没有 token 名**，
+   下面的名字是本层按同一风格补的（值逐字照抄）。之所以必须立 token：DESIGN.md §10
+   禁止 Tailwind 任意值（`h-[32px]` / `z-[30]`），没有 token 后续原语就只能违规。 */
+:root {
+  /* §4.3 高度 */
+  --h-control-sm: 28px;   /* 表格行内操作、紧凑控件 */
+  --h-control: 32px;      /* 按钮/输入/seg 默认 */
+  --h-control-lg: 36px;   /* 主 CTA（引导、空态） */
+  --h-row: 32px;          /* 操作态表格行 */
+  --h-row-lg: 40px;       /* 舒适态表格行（历史列表） */
+  --h-rail: 56px;         /* 左导航宽 */
+  --h-status: 32px;       /* 状态栏 */
+
+  /* §3.5 行文限宽：阅读区文本块 max-width，在栏内居中。
+     大面积留白靠限制行文宽度产生，不靠加 padding。 */
+  --measure-read: 72ch;
+
+  /* §4.4 z 序：面板 0 → popover 10 → drawer 20 → modal 30 → toast 40 → palette 50 */
+  --z-popover: 10;
+  --z-drawer: 20;
+  --z-modal: 30;
+  --z-toast: 40;
+  --z-palette: 50;
+}
+
+/* ── 4. 几何 / 字体 / 字阶：@theme 内一律给字面值 ───────────────── */
+@theme {
+  /* §4.2 圆角（4 步，禁止任意值） */
+  --radius-xs: 3px;      /* tooltip */
+  --radius-sm: 6px;      /* 按钮、输入、seg item、表格单元控件 */
+  --radius-md: 10px;     /* 面板、popover、drawer 内块、rail item */
+  --radius-lg: 14px;     /* modal、drawer、toast */
+  --radius-full: 999px;  /* 仅状态点、badge、switch */
+
+  /* §3.2 字体栈（单一栈，CJK 在通用族之前——见文件头"字体栈纪律"） */
+  --font-app: 'Inter', 'Microsoft YaHei UI', 'Source Han Sans CN', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
+
+  /* §3.3 字阶（字重只用 400/500/600；Windows ClearType 下小字号 700 发糊） */
+  --text-display: 20px;
+  --text-display--line-height: 28px;
+  --text-display--font-weight: 600;
+
+  --text-title: 15px;
+  --text-title--line-height: 22px;
+  --text-title--font-weight: 600;
+
+  /* --text-read 仅用于译文/原文阅读区；applyFontSize() 会运行时改写它 */
+  --text-read: 15.5px;
+  --text-read--line-height: 1.9;
+
+  /* --text-body 是 UI 默认字号（base.css 的 body 直接消费它）；可被 applyFontSize() 改写 */
+  --text-body: 13.5px;
+  --text-body--line-height: 1.6;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 1.5;
+
+  /* --text-micro 刻意**不参与** applyFontSize() 缩放：
+     表格列宽/表头随字号跳动会让 cue 表在改字号时整列重排 */
+  --text-micro: 11px;
+  --text-micro--line-height: 1.4;
+  --text-micro--font-weight: 500;
+}
+
+/* ── 5. 颜色：@theme inline + 异名变量 ─────────────────────────────
+   --color-* 与 --* 不同名，无环；inline 让 utility 直接引用语义变量，
+   于是 <html data-theme> 一切换，所有已渲染的 utility 立即换值。 */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-raised: var(--raised);
+  --color-scrim: var(--scrim);
+
+  --color-line: var(--line);
+  --color-lineStrong: var(--line-strong);
+
+  --color-ink1: var(--ink-1);
+  --color-ink2: var(--ink-2);
+  --color-ink3: var(--ink-3);
+  --color-inkInverse: var(--ink-inverse);
+
+  --color-primary: var(--primary);
+  --color-accent: var(--accent);
+  --color-accentSoft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-dangerSoft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warnSoft: var(--warn-soft);
+  --color-ok: var(--ok);
+  --color-okSoft: var(--ok-soft);
+}
+
+/* ── 6. 层叠兜底：--font-mono 的非分层（unlayered）重申 ────────────
+   Tailwind 把 @theme 变量输出到 `@layer theme`，而旧 styles/tokens.css 的
+   `:root { --font-mono: 'IBM Plex Mono', … }` 是**非分层**规则。按 CSS 层叠规则
+   非分层规则恒胜任何 @layer 内的规则——与源码顺序无关。也就是说，仅靠
+   main.tsx 的"旧→新"导入顺序**不足以**让新字体栈生效。
+   这里以非分层 :root 重申同一份字面值（值必须与上面 @theme 内的保持逐字一致），
+   非分层 vs 非分层才回到源码顺序比较，新文件在后 → 新值胜出。
+   R29 删除的旧 `@theme inline { --font-mono: var(--font-mono) }` 自引用是同一个
+   bug 的另一半；两半都要处理。scripts/verify-theme.mjs 的断言 #6 是这条的回归锁。
+   位置无关（非分层规则只与同为非分层的旧 :root 比源码顺序），放在文件末尾只为
+   让 1–6 的编号与阅读顺序一致。 */
+:root {
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
+}

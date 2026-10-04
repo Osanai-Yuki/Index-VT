@@ -1,0 +1,180 @@
+/* ============================================================
+   素笺 (Blank Sheet) — 基础层 base.css
+   ------------------------------------------------------------
+   职责：@font-face（离线打包字体）、文档级默认样式、焦点环、
+   数字排版工具类、elevation 工具类、滚动条、动效 token、
+   以及**全站唯一**的 prefers-reduced-motion 降级块。
+
+   本文件不得出现 #hex / rgb() 字面量（DESIGN.md §10 的漂移防线会扫描 src 下所有 css），
+   所有颜色一律走 tokens.css 的语义变量。
+   （注意：本文件的注释正文里禁止出现星号紧跟斜杠的序列，否则会提前闭合注释。）
+   ============================================================ */
+
+/* ── 离线字体（DESIGN.md §3.1）──────────────────────────────────
+   只打包 **latin 子集**（woff2 变体字重轴），CJK 一律走系统栈：
+   思源黑体单字重即 10MB+，与便携布局冲突。
+   `unicode-range` 必须声明且只覆盖 latin 段——否则浏览器会尝试用 Inter
+   渲染中文，落空后才回退，白白多一次匹配并可能选错字形。
+   **禁止**改用 <link> 外链（Google Fonts 等）：本应用是离线桌面应用。
+   合计 77.8KB（Inter 47.1KB + JetBrains Mono 30.7KB）。 */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;   /* 变体字重轴：一个文件覆盖 §3.3 允许的全部 app 字重 */
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin-wght400-600.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 500;   /* 变体字重轴：覆盖 .num / 刻度标签用到的 400 与 500 */
+  font-display: swap;
+  src: url('../assets/fonts/jetbrains-mono-latin-wght400-500.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+/* ── 文档级默认 ─────────────────────────────────────────────── */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  /* 单一栈 var(--font-app)：CJK 在通用族之前，见 tokens.css 文件头"字体栈纪律" */
+  font-family: var(--font-app);
+  /* UI 默认字号 = §3.3 的 --text-body（13.5px）。applyFontSize() 通过在 <html> 上
+     写内联 --text-body 来整体缩放，此处无需改动即可跟随。 */
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height, 1.6);
+  font-weight: 400;
+  background-color: var(--canvas);
+  color: var(--ink-1);
+  /* ClearType 下小字号做次像素抗锯齿会更糊 */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── 焦点环（DESIGN.md §5.12）───────────────────────────────────
+   任何 outline: none 必须同时给出替代的可见焦点样式。
+   此处刻意**不分层**，使其优先于 utility 层的 outline-none。 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── 文本选区 ─────────────────────────────────────────────────
+   DESIGN.md 未给选区色。--accent-soft 只有 8%/14%，作为选区几乎不可见，
+   因此这里用 24% accent 的 color-mix 派生（仍是 token 派生，非硬编码色值）。
+   已在 Task 2.1 报告中记为"DESIGN.md 待补规格"。 */
+::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--ink-1);
+}
+
+/* ── 数字排版（DESIGN.md §3.4，本类工具性价比最高的一条）────────
+   时间码 / tok·s / TTFT / VRAM / 计数 / 百分比 / 下载速度 / 端口 一律挂 .num。
+   tabular-nums 让每个数字等宽，千行 cue 表的时间码列才不会左右抖动。 */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── elevation 工具类（DESIGN.md §4.4）──────────────────────────
+   面板默认 --e-0（none）：**禁止给面板加阴影或边框**，层级只由
+   surface 浮在 canvas 上 + 间距表达。只有浮层家族用 .e-2 / .e-3。
+   深色主题下 --e-2/--e-3 已在 tokens.css 内换值为 1px 描边环，
+   因此组件不必为主题分支写两套样式，布局也不会因为多一条 border 而跳动。 */
+.e-2 {
+  box-shadow: var(--e-2);
+}
+
+.e-3 {
+  box-shadow: var(--e-3);
+}
+
+/* ── 滚动条（WebView2 = Chromium，用 -webkit- 前缀即可）────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 2px solid transparent;
+  border-radius: var(--radius-full);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── 动效 token（motion-plan.json：Premium，overshoot 0%）────────
+   签名缓动唯一一条；duration 只允许 quick / standard / slow 三档。
+   空间位移类永不 linear——唯一例外是 spinner 与进度条填充。
+   入场范式统一为 translateY(8px) + opacity，无 scale、无弹性。 */
+:root {
+  --ease-signature: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-quick: 180ms;
+  --dur-standard: 320ms;
+  --dur-slow: 520ms;
+}
+
+/* ============================================================
+   全站唯一的 prefers-reduced-motion 降级块
+   ------------------------------------------------------------
+   实现约束（motion-plan.json → reduced_motion_fallback）：
+   **禁止**在任何组件里散落 prefers-reduced-motion 判断，否则新增动效必然漏网。
+   旧实现只覆盖 .screen-in 与 .caret 两个选择器，其余 transition 全部漏网。
+   后续 Task 若新增动效类名，只需在此块内追加对应规则。
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* 流式光标改常亮：保留"仍在生成"的信息，不靠动画传达 */
+  .caret {
+    animation: none !important;
+  }
+
+  /* 状态点呼吸停止，但保持可见（信息不能随动画一起消失） */
+  .pulse {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+
+  /* 入场位移归零，只留 opacity 过渡 */
+  .enter-y,
+  .enter-x,
+  .enter-fade {
+    transform: none !important;
+  }
+
+  /* spinner 降速而非移除：完全移除会被当成卡死 */
+  .spinner {
+    animation-duration: 1600ms !important;
+  }
+}
