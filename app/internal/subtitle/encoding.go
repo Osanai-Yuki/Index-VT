@@ -6,19 +6,37 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/encoding/unicode/utf32"
 )
 
 var bytesBOMUTF8 = []byte{0xEF, 0xBB, 0xBF}
 
-// decodeText 编码识别（02 文档 §11.6）：UTF-8 BOM → UTF-8 有效性 → GBK。
+// decodeText 编码识别与解码（02 文档 §11.6）：BOM 优先，长 BOM 先判（UTF-32 LE
+// 与 UTF-16 LE 前两字节相同，B27）；无 BOM → UTF-8 有效性 → GBK/GB18030 兜底。
+// 返回 (文本, 编码名)；每个编码名都对应此处实际使用的解码器（识别与解码同点）。
 func decodeText(raw []byte) (string, string) {
 	if bytes.HasPrefix(raw, bytesBOMUTF8) {
 		return string(bytes.TrimPrefix(raw, bytesBOMUTF8)), "utf-8-bom"
 	}
-	if bytes.HasPrefix(raw, []byte{0xFF, 0xFE}) { // UTF-16 LE BOM（少见，容忍）
+	// UTF-32 LE BOM（FF FE 00 00）：必须早于 UTF-16 LE 判定（B27）
+	if bytes.HasPrefix(raw, []byte{0xFF, 0xFE, 0x00, 0x00}) {
+		dec := utf32.UTF32(utf32.LittleEndian, utf32.UseBOM).NewDecoder()
+		if out, err := dec.Bytes(raw); err == nil {
+			return string(out), "utf-32le"
+		}
+	}
+	// UTF-16 BE（FE FF）：旧实现完全漏判 → 被当 GBK 解码（B27）
+	if bytes.HasPrefix(raw, []byte{0xFE, 0xFF}) {
+		dec := unicode.UTF16(unicode.BigEndian, unicode.UseBOM).NewDecoder()
+		if out, err := dec.Bytes(raw); err == nil {
+			return string(out), "utf-16be"
+		}
+	}
+	// UTF-16 LE BOM（少见，容忍）
+	if bytes.HasPrefix(raw, []byte{0xFF, 0xFE}) {
 		dec := unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder()
 		if out, err := dec.Bytes(raw); err == nil {
-			return string(out), "utf-16"
+			return string(out), "utf-16le"
 		}
 	}
 	if utf8.Valid(raw) {

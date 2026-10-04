@@ -284,3 +284,166 @@ func makeTemp(t *testing.T, name, content string) string {
 	}
 	return p
 }
+
+// ---------- Task 1.16：字幕保真（B26 ASS \N / B27 BOM / B28 LRC） ----------
+// 夹具按真实函数命名（parseASS / serializeAstisubOpt / decodeText / parseLRC），保持最小。
+
+// mustParseASS 用真实 parseASS 构造 ASS 文档夹具。
+func mustParseASS(t *testing.T, src string) *SubtitleDoc {
+	t.Helper()
+	cues, styles, headerLines, eventsFormat, stylesSection, stylesFormat, err := parseASS(src)
+	if err != nil {
+		t.Fatalf("parseASS: %v", err)
+	}
+	if len(cues) == 0 {
+		t.Fatal("ASS 夹具未解析出 cue")
+	}
+	return &SubtitleDoc{
+		ID: "ass-test", Format: FormatASS, Encoding: "utf-8",
+		Cues: cues, Styles: styles, HeaderLines: headerLines, EventsLines: eventsFormat,
+		StylesSection: stylesSection, StylesFormat: stylesFormat,
+	}
+}
+
+// mustSerializeASS 走真实 ASS 序列化路径并返回字符串。
+func mustSerializeASS(t *testing.T, doc *SubtitleDoc, opt ExportOptions) string {
+	t.Helper()
+	out, err := NewEngine(nil).serializeAstisubOpt(doc, opt.Format, opt.Bilingual, false)
+	if err != nil {
+		t.Fatalf("序列化失败: %v", err)
+	}
+	return string(out)
+}
+
+const assEvents10 = "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+
+// assSrc 组装最小 ASS 源（Script Info + 指定 Events Format + 一条 Dialogue）。
+func assSrc(eventsFormat, dialogue string) string {
+	return "[Script Info]\nScriptType: v4.00+\n\n[Events]\n" + eventsFormat + "\n" + dialogue + "\n"
+}
+
+// B26：ASS `\N` 解析必须转成真实换行（否则 textToLines 按 \n 切分把整段当一行），
+// 序列化必须还原成 `\N` —— 解析与序列化严格互逆。
+func TestASSMultilineRoundtrip(t *testing.T) {
+	doc := mustParseASS(t, assSrc(assEvents10,
+		`Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,第一行\N第二行`))
+	if n := strings.Count(doc.Cues[0].Original, "\n"); n != 1 {
+		t.Fatalf(`ASS \N 未转成换行：Original=%q`, doc.Cues[0].Original)
+	}
+	out := mustSerializeASS(t, doc, ExportOptions{Format: FormatASS, Bilingual: BilingualTranslationOnly})
+	if !strings.Contains(out, `第一行\N第二行`) {
+		t.Fatalf("序列化未还原 \\N：%s", out)
+	}
+	if !strings.Contains(out, "Dialogue: 0,00:00:01.00,00:00:02.00,Default,,0,0,0,,第一行\\N第二行") {
+		t.Fatalf("Dialogue 行未按 \\N 写出：%s", out)
+	}
+}
+
+// B26：`\n`（软换行）与 `\h`（硬空格）按同一约定归一化。
+func TestASSSoftBreakAndHardSpace(t *testing.T) {
+	doc := mustParseASS(t, assSrc(assEvents10,
+		`Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,甲\n乙\h丙`))
+	if got := doc.Cues[0].Original; got != "甲\n乙 丙" {
+		t.Fatalf("软换行/硬空格归一化失败：%q", got)
+	}
+}
+
+// B26：v4.00 SSA 的 ScriptType 与原 Format 字段数必须保真；
+// 强推 V4+ 23 字段 Format 会让播放器按错误字段数解析。
+func TestSSAFormatLinePreserved(t *testing.T) {
+	src := "[Script Info]\nScriptType: v4.00\n\n[V4 Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n[Events]\nFormat: Marked, Start, End, Style, Text\nDialogue: Marked=0,0:00:01.00,0:00:02.00,Default,文本\n"
+	doc := mustParseASS(t, src)
+	out := mustSerializeASS(t, doc, ExportOptions{Format: FormatASS})
+	if strings.Contains(out, "v4.00+") {
+		t.Fatalf("v4.00 SSA 被升级成 V4+：%s", out)
+	}
+	if !strings.Contains(out, "Format: Marked, Start, End, Style, Text") {
+		t.Fatalf("原 Events Format 行未保留：%s", out)
+	}
+	if !strings.Contains(out, "Format: Name, Fontname, Fontsize") {
+		t.Fatalf("原 Styles Format 行未保留（不得强推 23 字段）：%s", out)
+	}
+	if !strings.Contains(out, "Dialogue: Marked=0,00:00:01.00,00:00:02.00,Default,文本") {
+		t.Fatalf("Dialogue 字段数未与原 Format 对齐：%s", out)
+	}
+}
+
+// B27：BOM 按长度优先判定 —— UTF-32 LE 前两字节与 UTF-16 LE 相同；
+// UTF-16 BE 旧实现完全漏判（被当 GBK 解成乱码）。
+func TestDetectEncodingBOMOrder(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  []byte
+		want string
+	}{
+		{"utf16be", []byte{0xFE, 0xFF, 0x00, '1'}, "utf-16be"},
+		{"utf32le", []byte{0xFF, 0xFE, 0x00, 0x00, '1', 0x00, 0x00, 0x00}, "utf-32le"}, // 必须早于 UTF-16 LE 判定
+		{"utf16le", []byte{0xFF, 0xFE, '1', 0x00}, "utf-16le"},
+		{"utf8bom", append([]byte{0xEF, 0xBB, 0xBF}, "1"...), "utf-8-bom"},
+	}
+	for _, c := range cases {
+		text, got := decodeText(c.raw)
+		if got != c.want {
+			t.Errorf("%s: 编码得到 %q，期望 %q", c.name, got, c.want)
+			continue
+		}
+		if text != "1" {
+			t.Errorf("%s: 解码文本 %q，期望 %q（BOM 未剥离或解码错位）", c.name, text, "1")
+		}
+	}
+}
+
+// mustParseLRC 用真实 parseLRC 构造 LRC 文档夹具。
+func mustParseLRC(t *testing.T, src string) *SubtitleDoc {
+	t.Helper()
+	cues, err := parseLRC(src)
+	if err != nil {
+		t.Fatalf("parseLRC: %v", err)
+	}
+	return &SubtitleDoc{ID: "lrc-test", Format: FormatLRC, Encoding: "utf-8", Cues: cues}
+}
+
+// B28：offset 位移后 startMs 不得为负（钳到 0）。
+// 夹具说明（相对 brief 的修正）：LRC 约定正 offset = 提前（parseLRC 内 offsetMs = -v），
+// 故 [offset:5000] + [00:01.00] 使 offsetMs=-5000 → 1000-5000=-4000，正是「负位移导致负时间戳」的复现。
+func TestLRCClampsNegativeStart(t *testing.T) {
+	doc := mustParseLRC(t, "[offset:5000]\n[00:01.00]第一句\n")
+	if doc.Cues[0].StartMs != 0 {
+		t.Fatalf("负时间戳未钳制：%d（应为 0）", doc.Cues[0].StartMs)
+	}
+	// 导出兜底：手工构造的文档带负时间戳也不得写出非法 LRC 时间戳。
+	out, err := NewEngine(nil).serializeLRC(
+		&SubtitleDoc{ID: "x", Format: FormatLRC,
+			Cues: []Cue{{Index: 1, StartMs: -123, EndMs: 100, Original: "句"}}},
+		ExportOptions{Format: FormatLRC})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "[00:00.00]句") {
+		t.Fatalf("导出产出负时间戳：%s", out)
+	}
+}
+
+// B28：serializeLRC 必须真正按双语模式分支。
+func TestLRCBilingualBranch(t *testing.T) {
+	doc := &SubtitleDoc{ID: "x", Format: FormatLRC,
+		Cues: []Cue{{Index: 1, StartMs: 1000, EndMs: 2000, Original: "原文", Translated: "译文"}}}
+	e := NewEngine(nil)
+	for _, c := range []struct {
+		mode BilingualMode
+		want string
+	}{
+		{BilingualTranslationOnly, "[00:01.00]译文"},
+		{BilingualDualLine, "[00:01.00]原文\n译文"},
+		// keep-original 主文件为译文替换，原文另存由 ExportOriginal 写 .orig（app.go:790 注释）
+		{BilingualKeepOriginal, "[00:01.00]译文"},
+	} {
+		out, err := e.serializeLRC(doc, ExportOptions{Format: FormatLRC, Bilingual: c.mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), c.want) {
+			t.Fatalf("双语模式 %s 输出错误：\n%s\n缺 %q", c.mode, out, c.want)
+		}
+	}
+}

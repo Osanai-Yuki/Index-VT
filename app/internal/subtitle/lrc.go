@@ -73,7 +73,11 @@ func parseLRC(text string) ([]Cue, error) {
 			continue
 		}
 		for _, st := range stamps {
-			raws = append(raws, rawCue{startMs: st + offsetMs, text: strings.TrimSpace(rest)})
+			start := st + offsetMs
+			if start < 0 {
+				start = 0 // offset 位移后可能为负 → 钳到 0，cue 起始不得为负（B28）
+			}
+			raws = append(raws, rawCue{startMs: start, text: strings.TrimSpace(rest)})
 		}
 	}
 	sort.SliceStable(raws, func(i, j int) bool { return raws[i].startMs < raws[j].startMs })
@@ -90,8 +94,10 @@ func parseLRC(text string) ([]Cue, error) {
 	return cues, nil
 }
 
-// serializeLRC 导出 LRC。LRC 无双行标准：双行模式导出"译文替换 + 原文另存 .lrc.orig"
-//（02 文档 §11.5）——此处只写译文替换版，另存由 Export 调用方处理。
+// serializeLRC 导出 LRC，按双语模式真正分支（B28）：
+//   - DualLine：LRC 无双行标准，同一时间标签内嵌换行「原文\n译文」；
+//   - TranslationOnly / KeepOriginal：译文替换（keep-original 的「原文另存 .lrc.orig」
+//     由 ExportOriginal 负责，主文件为译文，app.go 出口注释与 02 文档 §11.5 一致）。
 func (e *Engine) serializeLRC(doc *SubtitleDoc, opt ExportOptions) ([]byte, error) {
 	cues := append([]Cue(nil), doc.Cues...)
 	sortCues(cues)
@@ -99,12 +105,26 @@ func (e *Engine) serializeLRC(doc *SubtitleDoc, opt ExportOptions) ([]byte, erro
 	b.WriteString("[re:Index-VT]\n")
 	for _, c := range cues {
 		text := c.Original
-		if opt.Bilingual != BilingualTranslationOnly || c.Translated != "" {
+		switch opt.Bilingual {
+		case BilingualDualLine:
+			if c.Translated != "" && c.Original != "" {
+				text = c.Original + "\n" + c.Translated
+			}
+		case BilingualTranslationOnly, BilingualKeepOriginal:
 			if c.Translated != "" {
-				text = c.Translated // LRC 仅译文替换模式
+				text = c.Translated
+			}
+		default:
+			// 未指定/未知模式：有译文用译文，否则回退原文（兼容旧行为）
+			if c.Translated != "" {
+				text = c.Translated
 			}
 		}
-		b.WriteString(fmt.Sprintf("[%s]%s\n", lrcTime(c.StartMs), text))
+		start := c.StartMs
+		if start < 0 {
+			start = 0 // 兜底：手工构造/旧快照的负时间戳不得进入导出（B28）
+		}
+		b.WriteString(fmt.Sprintf("[%s]%s\n", lrcTime(start), text))
 	}
 	return []byte(b.String()), nil
 }

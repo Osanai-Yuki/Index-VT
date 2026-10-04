@@ -61,9 +61,11 @@ func ReinsertOverrideTags(translated string, tags []string) (string, bool) {
 // parseASS 解析 ASS：cue 从原始 Dialogue 行捕获（astisub 会把 {\i1} 内联覆写
 // 标签吞进 InlineStyle 且写出时丢失——ADR-007 预警场景，此处以自捕获层保真）；
 // astisub 仅作结构校验（不通过则报错）。
-func parseASS(text string) (cues []Cue, styles []StyleDef, headerLines, eventsFormat []string, err error) {
+// 另捕获样式段头与样式 Format 行原文（stylesSection/stylesFormat），供序列化
+// 原样回写：v4.00 SSA 的字段数与 V4+ 不同，强推 V4+ Format 会让播放器错位（B26）。
+func parseASS(text string) (cues []Cue, styles []StyleDef, headerLines, eventsFormat []string, stylesSection, stylesFormat string, err error) {
 	if _, aerr := astisub.ReadFromSSA(strings.NewReader(text)); aerr != nil {
-		return nil, nil, nil, nil, aerr
+		return nil, nil, nil, nil, "", "", aerr
 	}
 	// 自捕获：逐行扫描原始段
 	section := ""
@@ -93,6 +95,8 @@ func parseASS(text string) (cues []Cue, styles []StyleDef, headerLines, eventsFo
 			}
 			if strings.HasPrefix(trimmed, "Format:") {
 				styleFieldIdx = assFieldIndex(strings.TrimPrefix(trimmed, "Format:"))
+				stylesSection = section // 段头原文（[V4 Styles] / [V4+ Styles]）
+				stylesFormat = trimmed  // Format 行原文（字段数保真）
 			}
 		case "[Events]":
 			if strings.HasPrefix(trimmed, "Format:") {
@@ -120,9 +124,15 @@ func parseASS(text string) (cues []Cue, styles []StyleDef, headerLines, eventsFo
 				if err1 != nil || err2 != nil {
 					continue
 				}
+				// ASS 换行标记转真实换行；解析与序列化必须严格互逆（B26）
+				// ——否则多行 cue 会被当成一行送翻，换行位置丢失。
+				rawText := get("Text")
+				rawText = strings.ReplaceAll(rawText, `\N`, "\n")
+				rawText = strings.ReplaceAll(rawText, `\n`, "\n")
+				rawText = strings.ReplaceAll(rawText, `\h`, " ") // 硬空格
 				dialogs = append(dialogs, rawDlg{
 					startMs: start, endMs: end,
-					style: get("Style"), text: get("Text"),
+					style: get("Style"), text: rawText,
 				})
 			}
 		}
@@ -137,7 +147,7 @@ func parseASS(text string) (cues []Cue, styles []StyleDef, headerLines, eventsFo
 			State:     CuePending,
 		})
 	}
-	return cues, styles, headerLines, eventsFormat, nil
+	return cues, styles, headerLines, eventsFormat, stylesSection, stylesFormat, nil
 }
 
 func assFieldNames(formatArg string) []string {
@@ -183,6 +193,8 @@ func (e *Engine) serializeAstisubOpt(doc *SubtitleDoc, format Format, bilingual 
 	cues := append([]Cue(nil), doc.Cues...)
 	sortCues(cues)
 	sub := astisub.NewSubtitles()
+	// dialogueTexts 与 cues 同序：ASS 自绘 [Events] 段时按原 Format 字段重排（B26）
+	dialogueTexts := make([]string, 0, len(cues))
 	for _, c := range cues {
 		mainText := c.Translated
 		if useOriginal || mainText == "" {
@@ -197,6 +209,12 @@ func (e *Engine) serializeAstisubOpt(doc *SubtitleDoc, format Format, bilingual 
 		case BilingualKeepOriginal, BilingualTranslationOnly:
 			// 仅译文（keep-original 的"原文另存"由 Export 另写一个文件）
 		}
+		if format == FormatASS {
+			// ASS 用字面 \N 表示换行：解析侧 \N→"\n" 的逆变换（B26）。
+			// 须在 textToLines 之前完成，多行合成单段由写出端原样输出。
+			mainText = strings.ReplaceAll(mainText, "\n", `\N`)
+		}
+		dialogueTexts = append(dialogueTexts, mainText)
 		item := &astisub.Item{
 			StartAt: time.Duration(c.StartMs) * time.Millisecond,
 			EndAt:   time.Duration(c.EndMs) * time.Millisecond,
@@ -220,7 +238,11 @@ func (e *Engine) serializeAstisubOpt(doc *SubtitleDoc, format Format, bilingual 
 	case FormatASS:
 		err = sub.WriteToSSA(&buf)
 		if err == nil && doc.Format == FormatASS && len(doc.HeaderLines) > 0 {
-			out := patchASSHeaders(buf.Bytes(), doc)
+			var events []string
+			if len(doc.EventsLines) > 0 {
+				events = assDialogueLines(cues, dialogueTexts, doc.EventsLines[0])
+			}
+			out := patchASSHeaders(buf.Bytes(), doc, events)
 			return []byte(out), nil
 		}
 	case FormatVTT:
@@ -255,10 +277,54 @@ func textToLines(text string) []astisub.Line {
 	return lines
 }
 
-// patchASSHeaders 用自捕获的 [Script Info] 与 [V4+ Styles] 原文替换
-// astisub 输出的对应段；[Events] 段保持 astisub 原样（其 Format 行与
-// Dialogue 行自洽，VLC 兼容）。
-func patchASSHeaders(out []byte, doc *SubtitleDoc) string {
+// assStylesFormatDefault V4+ 样式段默认 Format 行（原始行缺失时，如新建/转换文档）。
+const assStylesFormatDefault = "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
+
+// assDialogueLines 按原始 [Events] Format 的字段顺序生成 Dialogue 行（B26 保真：
+// 字段数必须与原 Format 行严格一致，否则播放器按错误字段数解析）。texts 与 cues 同序。
+func assDialogueLines(cues []Cue, texts []string, eventsFormatLine string) []string {
+	fields := assFieldNames(strings.TrimPrefix(eventsFormatLine, "Format:"))
+	lines := make([]string, 0, len(cues))
+	for i, c := range cues {
+		parts := make([]string, 0, len(fields))
+		for _, f := range fields {
+			switch strings.ToLower(f) {
+			case "marked":
+				parts = append(parts, "Marked=0")
+			case "layer", "marginl", "marginr", "marginv":
+				parts = append(parts, "0")
+			case "start":
+				parts = append(parts, formatASSTime(c.StartMs))
+			case "end":
+				parts = append(parts, formatASSTime(c.EndMs))
+			case "style":
+				parts = append(parts, c.StyleName)
+			case "text":
+				parts = append(parts, texts[i])
+			default: // name / effect / 未知字段
+				parts = append(parts, "")
+			}
+		}
+		lines = append(lines, "Dialogue: "+strings.Join(parts, ","))
+	}
+	return lines
+}
+
+// formatASSTime 毫秒 → "HH:MM:SS.cc"（与 astisub 写出格式一致，2 位小时/厘秒）。
+func formatASSTime(ms int64) string {
+	h := ms / 3600000
+	m := (ms % 3600000) / 60000
+	s := (ms % 60000) / 1000
+	cs := (ms % 1000) / 10
+	return fmt.Sprintf("%02d:%02d:%02d.%02d", h, m, s, cs)
+}
+
+// patchASSHeaders 用自捕获的 [Script Info]、[V4/V4+ Styles] 与 [Events] 原文替换
+// astisub 输出的对应段（B26 保真）：ScriptType、样式段头、两处 Format 行与字段数
+// 一律沿用原文；仅当原始行缺失（新建文档 / 格式转换）才生成 V4+ 默认。
+// dialogueLines 为按原 Events Format 生成的 Dialogue 行；为空时保留 astisub 的 [Events] 段
+// （其 Format 行与 Dialogue 行自洽）。
+func patchASSHeaders(out []byte, doc *SubtitleDoc, dialogueLines []string) string {
 	s := string(out)
 	eventsIdx := strings.Index(s, "[Events]")
 	if eventsIdx < 0 {
@@ -267,6 +333,15 @@ func patchASSHeaders(out []byte, doc *SubtitleDoc) string {
 	}
 	eventsPart := s[eventsIdx:]
 
+	stylesSection := doc.StylesSection
+	if stylesSection == "" {
+		stylesSection = "[V4+ Styles]"
+	}
+	stylesFormat := doc.StylesFormat
+	if stylesFormat == "" {
+		stylesFormat = assStylesFormatDefault
+	}
+
 	var b strings.Builder
 	b.WriteString("[Script Info]\n")
 	for _, ln := range doc.HeaderLines {
@@ -274,14 +349,27 @@ func patchASSHeaders(out []byte, doc *SubtitleDoc) string {
 		b.WriteString("\n")
 	}
 	if len(doc.Styles) > 0 {
-		b.WriteString("\n[V4+ Styles]\n")
-		b.WriteString("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
+		b.WriteString("\n")
+		b.WriteString(stylesSection)
+		b.WriteString("\n")
+		b.WriteString(stylesFormat)
+		b.WriteString("\n")
 		for _, st := range doc.Styles {
 			b.WriteString(st.Raw)
 			b.WriteString("\n")
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(eventsPart)
+	if len(dialogueLines) > 0 && len(doc.EventsLines) > 0 {
+		b.WriteString("[Events]\n")
+		b.WriteString(doc.EventsLines[0])
+		b.WriteString("\n")
+		for _, ln := range dialogueLines {
+			b.WriteString(ln)
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString(eventsPart)
+	}
 	return b.String()
 }

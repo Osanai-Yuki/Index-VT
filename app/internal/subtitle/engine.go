@@ -72,6 +72,11 @@ type SubtitleDoc struct {
 	Styles      []StyleDef `json:"styles,omitempty"`
 	HeaderLines []string   `json:"-"` // ASS [Script Info] 原始行（roundtrip 保真）
 	EventsLines []string   `json:"-"` // ASS [Events] Format 行（保真）
+	// ASS 样式段头与 Format 行原文（[V4 Styles] / [V4+ Styles]，字段数保真，B26）。
+	// 与 HeaderLines/EventsLines 一样在 Open 后不再被改写，快照浅拷贝安全；
+	// 序列化侧只读，不得就地修改（1.17 快照与并发读共享）。
+	StylesSection string `json:"-"`
+	StylesFormat  string `json:"-"`
 }
 
 // BilingualMode 双语模式（01 文档 §5.4 三模式）。
@@ -158,6 +163,7 @@ func (e *Engine) Open(path string) (*SubtitleDoc, error) {
 	var cues []Cue
 	var styles []StyleDef
 	var headerLines, eventsFormat []string
+	var stylesSection, stylesFormat string
 	switch format {
 	case FormatSRT:
 		cues, err = parseSRT(text)
@@ -166,7 +172,7 @@ func (e *Engine) Open(path string) (*SubtitleDoc, error) {
 	case FormatLRC:
 		cues, err = parseLRC(text)
 	case FormatASS:
-		cues, styles, headerLines, eventsFormat, err = parseASS(text)
+		cues, styles, headerLines, eventsFormat, stylesSection, stylesFormat, err = parseASS(text)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("解析 %s 失败: %w", format, err)
@@ -179,14 +185,16 @@ func (e *Engine) Open(path string) (*SubtitleDoc, error) {
 	defer e.mu.Unlock()
 	e.seq++
 	doc := &SubtitleDoc{
-		ID:          fmt.Sprintf("sub-%d", e.seq),
-		Path:        path,
-		Format:      format,
-		Encoding:    enc,
-		Cues:        cues,
-		Styles:      styles,
-		HeaderLines: headerLines,
-		EventsLines: eventsFormat,
+		ID:            fmt.Sprintf("sub-%d", e.seq),
+		Path:          path,
+		Format:        format,
+		Encoding:      enc,
+		Cues:          cues,
+		Styles:        styles,
+		HeaderLines:   headerLines,
+		EventsLines:   eventsFormat,
+		StylesSection: stylesSection,
+		StylesFormat:  stylesFormat,
 	}
 	e.docs[doc.ID] = doc
 	e.touchLocked(doc.ID)
