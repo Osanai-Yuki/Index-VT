@@ -15,6 +15,13 @@
  * #1 锁双主题 token 换值，#4 锁 applyFontSize 只缩放三级正文字号、不动 --text-micro。
  * 另附两条 R29/字体落地检查（#6 #7），见文末说明。
  *
+ * #8/#9/#10 是**新旧 token 层共存**的回归锁（Fix round 1，见报告「Fix round 1」）：
+ *   新层原始变量一律加 `--suj-` 前缀，与旧 styles/tokens.css 的原始变量零重名。
+ *   #8 锁旧变量未被新层覆盖（--ink-1 仍是 #E9EDF5、--accent 仍是 #E8A33D）
+ *   #9 锁新变量独立解析（--suj-ink-1 light=#1A1A18 / dark=#ECECEA）
+ *   #10 锁旧 utility `bg-bg-3 text-ink-1` 渲染对比度 ≥4.5:1——
+ *      这条正是当初能抓出「默认主题下旧页面 1.11:1 不可读」缺陷的断言，禁止放宽。
+ *
  * 断言失败即 exit 1。**不得为了让它变绿而放宽断言**——修 CSS。
  */
 import { spawn } from 'node:child_process'
@@ -109,9 +116,23 @@ async function ensureDevServer() {
   throw new Error(`vite dev 90s 内未就绪\n${output}`)
 }
 
-/* ── Playwright：优先用其自带 chromium，缺失时退回系统 Chrome/Edge ──
-   Task 2.2 会把 playwright 正式装成 devDependency 并下载浏览器；
-   本脚本对两者都兼容，避免"没装浏览器就跑不了门禁"。 */
+/* ══════════════════════════════════════════════════════════════
+   本机 harness 两条硬事实（Task 2.2 的 verify-a11y.mjs、Task 2.10 的
+   contrast/keyboard 脚本会踩同样的坑，务必照抄，别重新发现）：
+
+   (1) 浏览器：`npx playwright install chromium` 在本机失败——cdn.playwright.dev
+       单请求 30s 超时（实测），ms-playwright 缓存里的 chromium-1228 又与
+       playwright 1.63 要的 1243 不匹配。因此**不依赖 Playwright 自带浏览器**，
+       直接用 `channel: 'chrome'` 驱动系统已装的 Chrome（本机 154.x）。
+       playwright 目前是 `npm i --no-save` 装的（未进 package.json）；
+       Task 2.2 才正式登记 devDependency。
+
+   (2) 主机：本机对 IPv6 loopback `::1` 的 connect() 返回 **EACCES**（不是 refused），
+       而 vite 默认 host `localhost` 只绑 `[::1]` → Node 探针连不上。所以显式
+       `--host 127.0.0.1`（见下方 DEV_HOST），浏览器与探针都走 IPv4。
+   ══════════════════════════════════════════════════════════════ */
+
+/* Playwright 只作为"驱动系统 Chrome 的库"使用，不下载自带浏览器（见上 (1)）。 */
 async function loadChromium() {
   try {
     return (await import('playwright')).chromium
@@ -124,10 +145,12 @@ async function loadChromium() {
 }
 
 async function launchBrowser(chromium) {
+  /* 顺序即优先级：系统 Chrome 优先（无需下载自带浏览器，见上 (1)），
+     再退 Edge，最后才试 Playwright 自带 chromium（本机通常没有）。 */
   const attempts = [
-    { label: 'playwright chromium', opts: {} },
     { label: 'system chrome', opts: { channel: 'chrome' } },
     { label: 'system msedge', opts: { channel: 'msedge' } },
+    { label: 'playwright chromium', opts: {} },
   ]
   let lastError
   for (const a of attempts) {
@@ -167,26 +190,26 @@ async function runBrowserAssertions(page) {
     await document.fonts.ready
   })
 
-  /* ── #1 双主题 --canvas 换值 ─────────────────────────────── */
+  /* ── #1 双主题 --suj-canvas 换值 ─────────────────────────────── */
   const themeFlip = await page.evaluate(async (mod) => {
     const m = await import(mod)
-    const read = () => getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim()
+    const read = () => getComputedStyle(document.documentElement).getPropertyValue('--suj-canvas').trim()
     const out = {}
     m.applyTheme('light')
     out.lightAttr = document.documentElement.getAttribute('data-theme')
     out.lightCanvas = read()
-    out.lightSurface = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim()
-    out.lightInk1 = getComputedStyle(document.documentElement).getPropertyValue('--ink-1').trim()
+    out.lightSurface = getComputedStyle(document.documentElement).getPropertyValue('--suj-surface').trim()
+    out.lightInk1 = getComputedStyle(document.documentElement).getPropertyValue('--suj-ink-1').trim()
     out.lightColorScheme = getComputedStyle(document.documentElement).colorScheme
 
     m.applyTheme('dark')
     out.darkAttr = document.documentElement.getAttribute('data-theme')
     out.darkCanvas = read()
-    out.darkSurface = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim()
-    out.darkInk1 = getComputedStyle(document.documentElement).getPropertyValue('--ink-1').trim()
+    out.darkSurface = getComputedStyle(document.documentElement).getPropertyValue('--suj-surface').trim()
+    out.darkInk1 = getComputedStyle(document.documentElement).getPropertyValue('--suj-ink-1').trim()
     out.darkColorScheme = getComputedStyle(document.documentElement).colorScheme
-    out.darkE2 = getComputedStyle(document.documentElement).getPropertyValue('--e-2').trim()
-    out.darkAccentSoft = getComputedStyle(document.documentElement).getPropertyValue('--accent-soft').trim()
+    out.darkE2 = getComputedStyle(document.documentElement).getPropertyValue('--suj-e-2').trim()
+    out.darkAccentSoft = getComputedStyle(document.documentElement).getPropertyValue('--suj-accent-soft').trim()
 
     m.applyTheme('light')
     out.systemResolved = m.resolveTheme('system')
@@ -196,11 +219,11 @@ async function runBrowserAssertions(page) {
 
   const lightOk = themeFlip.lightCanvas.toLowerCase() === '#fbfbfa'
   const darkOk = themeFlip.darkCanvas.toLowerCase() === '#131312'
-  record(1, '--canvas light=#FBFBFA / dark=#131312（同一套语义 token 换值）', lightOk && darkOk, [
-    `light: data-theme="${themeFlip.lightAttr}" --canvas=${themeFlip.lightCanvas} --surface=${themeFlip.lightSurface} --ink-1=${themeFlip.lightInk1} color-scheme=${themeFlip.lightColorScheme}`,
-    `dark : data-theme="${themeFlip.darkAttr}" --canvas=${themeFlip.darkCanvas} --surface=${themeFlip.darkSurface} --ink-1=${themeFlip.darkInk1} color-scheme=${themeFlip.darkColorScheme}`,
-    `dark : --e-2=${themeFlip.darkE2}`,
-    `dark : --accent-soft=${themeFlip.darkAccentSoft}`,
+  record(1, '--suj-canvas light=#FBFBFA / dark=#131312（同一套语义 token 换值）', lightOk && darkOk, [
+    `light: data-theme="${themeFlip.lightAttr}" --suj-canvas=${themeFlip.lightCanvas} --suj-surface=${themeFlip.lightSurface} --suj-ink-1=${themeFlip.lightInk1} color-scheme=${themeFlip.lightColorScheme}`,
+    `dark : data-theme="${themeFlip.darkAttr}" --suj-canvas=${themeFlip.darkCanvas} --suj-surface=${themeFlip.darkSurface} --suj-ink-1=${themeFlip.darkInk1} color-scheme=${themeFlip.darkColorScheme}`,
+    `dark : --suj-e-2=${themeFlip.darkE2}`,
+    `dark : --suj-accent-soft=${themeFlip.darkAccentSoft}`,
     `resolveTheme('system') → ${themeFlip.systemResolved}；storedTheme() → ${themeFlip.storedAfter}`,
     `期望 light #FBFBFA、dark #131312`,
   ].join('\n'))
@@ -263,9 +286,9 @@ async function runBrowserAssertions(page) {
       label,
       body: getComputedStyle(document.body).fontSize,
       micro: getComputedStyle(micro).fontSize,
-      read: getComputedStyle(document.documentElement).getPropertyValue('--text-read').trim(),
-      bodyToken: getComputedStyle(document.documentElement).getPropertyValue('--text-body').trim(),
-      caption: getComputedStyle(document.documentElement).getPropertyValue('--text-caption').trim(),
+      read: getComputedStyle(document.documentElement).getPropertyValue('--suj-text-read').trim(),
+      bodyToken: getComputedStyle(document.documentElement).getPropertyValue('--suj-text-body').trim(),
+      caption: getComputedStyle(document.documentElement).getPropertyValue('--suj-text-caption').trim(),
       microToken: getComputedStyle(document.documentElement).getPropertyValue('--text-micro').trim(),
     })
 
@@ -284,10 +307,10 @@ async function runBrowserAssertions(page) {
   const microPx = parseFloat(fontScale.large.micro)
   const scaleOk = Math.abs(largePx - 14.85) <= 0.01 && Math.abs(microPx - 11) <= 0.01
   record(4, "applyFontSize('large') → body 14.85px，而 .text-micro 仍 11px", scaleOk, [
-    `standard : body=${fontScale.before.body} micro=${fontScale.before.micro}  (--text-read=${fontScale.before.read} --text-body=${fontScale.before.bodyToken} --text-caption=${fontScale.before.caption} --text-micro=${fontScale.before.microToken})`,
-    `large    : body=${fontScale.large.body} micro=${fontScale.large.micro}  (--text-read=${fontScale.large.read} --text-body=${fontScale.large.bodyToken} --text-caption=${fontScale.large.caption} --text-micro=${fontScale.large.microToken})`,
-    `small    : body=${fontScale.small.body} micro=${fontScale.small.micro}  (--text-read=${fontScale.small.read} --text-caption=${fontScale.small.caption})`,
-    `restored : body=${fontScale.restored.body} micro=${fontScale.restored.micro}  (--text-body=${fontScale.restored.bodyToken})`,
+    `standard : body=${fontScale.before.body} micro=${fontScale.before.micro}  (--suj-text-read=${fontScale.before.read} --suj-text-body=${fontScale.before.bodyToken} --suj-text-caption=${fontScale.before.caption} --text-micro=${fontScale.before.microToken})`,
+    `large    : body=${fontScale.large.body} micro=${fontScale.large.micro}  (--suj-text-read=${fontScale.large.read} --suj-text-body=${fontScale.large.bodyToken} --suj-text-caption=${fontScale.large.caption} --text-micro=${fontScale.large.microToken})`,
+    `small    : body=${fontScale.small.body} micro=${fontScale.small.micro}  (--suj-text-read=${fontScale.small.read} --suj-text-caption=${fontScale.small.caption})`,
+    `restored : body=${fontScale.restored.body} micro=${fontScale.restored.micro}  (--suj-text-body=${fontScale.restored.bodyToken})`,
     `期望 large: body ≈ 14.85px（13.5 × 1.1）、.text-micro = 11px（刻意不缩放，否则表格列宽随字号跳动）`,
   ].join('\n'))
 
@@ -346,6 +369,102 @@ async function runBrowserAssertions(page) {
     `document.fonts.check('400 16px "JetBrains Mono"') = ${fontFaces.jbm}`,
     `已注册 @font-face：${fontFaces.faces.join(' | ') || '（无）'}`,
     `指向站外的字体请求：${external.length ? '有（违规）→ ' + external.map((r) => r.url).join(', ') : '无（符合离线约束）'}`,
+  ].join('\n'))
+
+  /* ── #8（共存锁）旧原始变量未被新层覆盖 ─────────────────────────
+     新层原始变量一律加 --suj- 前缀（tokens.css），与旧 styles/tokens.css 的
+     原始变量零重名。因此 <html> 上的 --ink-1 / --accent 必须保持旧字面值。
+     改名前：新层 light 块也写 --ink-1/--accent（同名、非分层、源码在后）→
+     把旧值覆盖成素笺浅色墨色，这正是 Fix round 1 的阻塞缺陷根因。 */
+  const legacyVars = await page.evaluate(async (mod) => {
+    const m = await import(mod)
+    m.applyTheme('light')
+    const cs = getComputedStyle(document.documentElement)
+    return {
+      ink1: cs.getPropertyValue('--ink-1').trim(),
+      accent: cs.getPropertyValue('--accent').trim(),
+      ink2: cs.getPropertyValue('--ink-2').trim(),
+      ink3: cs.getPropertyValue('--ink-3').trim(),
+    }
+  }, THEME_MODULE)
+  const legacyOk =
+    legacyVars.ink1.toLowerCase() === '#e9edf5' &&
+    legacyVars.accent.toLowerCase() === '#e8a33d'
+  record(8, '[共存] 旧 --ink-1=#E9EDF5 / --accent=#E8A33D 未被新层覆盖', legacyOk, [
+    `getComputedStyle(html) --ink-1  = ${legacyVars.ink1}   （期望旧值 #E9EDF5）`,
+    `getComputedStyle(html) --accent = ${legacyVars.accent}   （期望旧值 #E8A33D）`,
+    `参考：--ink-2 = ${legacyVars.ink2}   --ink-3 = ${legacyVars.ink3}`,
+    legacyOk
+      ? '新旧零重名共存：新层走 --suj-ink-1 / --suj-accent，未触碰旧名'
+      : '新层原始变量与旧名冲突并覆盖 → 旧页面在浅色主题下拿到素笺墨色（缺陷根因）',
+  ].join('\n'))
+
+  /* ── #9（共存锁）新层 --suj-ink-1 独立解析并随主题换值 ─────────────── */
+  const sujVars = await page.evaluate(async (mod) => {
+    const m = await import(mod)
+    const read = () => getComputedStyle(document.documentElement).getPropertyValue('--suj-ink-1').trim()
+    m.applyTheme('light')
+    const light = read()
+    m.applyTheme('dark')
+    const dark = read()
+    m.applyTheme('light')
+    return { light, dark }
+  }, THEME_MODULE)
+  const sujOk =
+    sujVars.light.toLowerCase() === '#1a1a18' &&
+    sujVars.dark.toLowerCase() === '#ececea'
+  record(9, '[共存] 新层 --suj-ink-1 light=#1A1A18 / dark=#ECECEA（独立解析）', sujOk, [
+    `light: --suj-ink-1 = ${sujVars.light}   （期望 #1A1A18）`,
+    `dark : --suj-ink-1 = ${sujVars.dark}   （期望 #ECECEA）`,
+    sujOk
+      ? '--suj-ink-1 与旧 --ink-1(#E9EDF5) 各自独立换值：两条链互不干扰'
+      : '--suj-ink-1 为空或错值 → 新层原始变量未按 --suj- 前缀定义',
+  ].join('\n'))
+
+  /* ── #10（共存锁·可读性）旧 utility bg-bg-3 + text-ink-1 对比度 ≥4.5:1 ──
+     这条正是应当抓出 Fix round 1 缺陷的断言：改名前 text-ink-1 经 --ink-1 解析到
+     新层 #1A1A18（暗墨），落在旧 bg-bg-3(#1D2330 暗面板)上 = 1.11:1，基本不可读；
+     改名后 --ink-1 回到旧值 #E9EDF5 → 13.4:1。**禁止放宽。** */
+  const legacyContrast = await page.evaluate(async (mod) => {
+    const m = await import(mod)
+    m.applyTheme('light')   // 浅色是默认主题，也是缺陷现场
+    const el = document.createElement('div')
+    el.className = 'bg-bg-3 text-ink-1'
+    el.textContent = 'Legacy cue row 00:00:01.000 中文样本'
+    document.body.appendChild(el)
+    const cs = getComputedStyle(el)
+    const fg = cs.color
+    const bg = cs.backgroundColor
+    el.remove()
+
+    const parse = (c) => {
+      const mm = c.match(/rgba?\(([^)]+)\)/i)
+      if (!mm) return null
+      const p = mm[1].split(',').map((s) => parseFloat(s))
+      return { r: p[0], g: p[1], b: p[2] }
+    }
+    const lum = ({ r, g, b }) => {
+      const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+    }
+    const F = parse(fg)
+    const B = parse(bg)
+    let ratio = null
+    if (F && B) {
+      const l1 = lum(F)
+      const l2 = lum(B)
+      ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)
+    }
+    return { fg, bg, ratio: ratio == null ? null : Math.round(ratio * 100) / 100 }
+  }, THEME_MODULE)
+  const contrastOk = legacyContrast.ratio != null && legacyContrast.ratio >= 4.5
+  record(10, '[共存·可读性] 旧 utility bg-bg-3 + text-ink-1 对比度 ≥4.5:1', contrastOk, [
+    `.bg-bg-3.text-ink-1 computed color           = ${legacyContrast.fg}`,
+    `.bg-bg-3.text-ink-1 computed background-color = ${legacyContrast.bg}`,
+    `WCAG 对比度 = ${legacyContrast.ratio}:1   （门槛 ≥4.5:1）`,
+    contrastOk
+      ? '旧页面文字在默认（浅色）主题下可读 —— 缺陷根因（原始变量同名覆盖）已消除'
+      : '暗底暗字：新层覆盖了旧 --ink-1 → 这正是 Fix round 1 的阻塞缺陷，须改名 --suj-* 修复',
   ].join('\n'))
 }
 

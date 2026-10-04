@@ -32,11 +32,14 @@ export const FONT_SIZE_STORAGE_KEY = 'indexvt.fontSize'
 
 const SYSTEM_QUERY = '(prefers-color-scheme: dark)'
 
-/** DESIGN.md §3.3 的字面值。applyFontSize 以它为基准乘系数。 */
+/** DESIGN.md §3.3 的字面值。applyFontSize 以它为基准乘系数。
+ *  token 名带 --suj- 前缀：与旧 styles/tokens.css 的原始变量零重名（共存规则，
+ *  见 tokens.css 文件头与 DESIGN.md §9）。tokens.css 的 @theme 里
+ *  --text-read/body/caption 引用这三个 --suj-text-*，故内联覆盖能穿透到 utility。 */
 const SCALABLE_TEXT_TOKENS = [
-  { token: '--text-read', base: 15.5 },
-  { token: '--text-body', base: 13.5 },
-  { token: '--text-caption', base: 12 },
+  { token: '--suj-text-read', base: 15.5 },
+  { token: '--suj-text-body', base: 13.5 },
+  { token: '--suj-text-caption', base: 12 },
 ] as const
 
 /**
@@ -108,8 +111,9 @@ export function applyTheme(mode: ThemeMode): void {
 }
 
 /**
- * 应用正文字号：只在 <html> 上写内联 --text-read / --text-body / --text-caption。
- * 内联自定义属性优先于样式表 :root 的同名声明，因此能覆盖 @theme 的字面值；
+ * 应用正文字号：只在 <html> 上写内联 --suj-text-read / --suj-text-body / --suj-text-caption。
+ * 内联自定义属性优先于样式表 :root 的同名声明，因此能覆盖 tokens.css 里这三个原始变量的
+ * 字面值；@theme 的 --text-read/body/caption 又引用它们，于是 text-* utility 一起跟随。
  * 'standard' 档直接移除内联覆盖，交回 tokens.css 作为唯一权威来源。
  */
 export function applyFontSize(size: FontSize): void {

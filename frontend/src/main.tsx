@@ -3,9 +3,12 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 /* CSS 导入顺序 = 层叠顺序，**不可调换**：
    旧 styles/tokens.css 在前（现存 6 个页面有 203 处旧 utility 依赖它，Track C 才整体删除），
-   新 theme/* 在后 → 同名变量（--ink-1 / --accent / --danger / --warn / --font-mono …）
-   由新层取胜。R29 已删掉旧文件 @theme inline 里的六行自引用条目；但导入顺序本身
-   不能当作唯一兜底（见 theme/tokens.css 里 --font-mono 的非分层重申注释）。 */
+   新 theme/* 在后。新层原始变量一律加 --suj- 前缀（--suj-ink-1 / --suj-accent / --suj-danger …），
+   与旧的 --ink-1 / --accent / --danger / --warn **零重名** → 两条链各自独立解析，旧页面不再被
+   素笺浅色墨色覆盖（Fix round 1 修复的 1.11:1 不可读缺陷；共存规则见 DESIGN.md §9）。
+   唯一残留的同名原始变量是 --font-mono（font-mono utility 的 @theme 键，不能加前缀），
+   靠 theme/tokens.css 末尾的**非分层重申**让新层取胜——不能只靠导入顺序兜底（见该处注释）。
+   R29 已删掉旧文件 @theme inline 里的六行自引用条目。 */
 import './styles/tokens.css'
 import './theme/tokens.css'
 import './theme/base.css'

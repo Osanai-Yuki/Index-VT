@@ -6,12 +6,27 @@
    DESIGN.md §2.3 的对比度（light 17.4/7.5/5.1、dark 14.7/7.3/4.8）是对这些
    字面值实算出来的，改动任何一个数字都会让 ≥4.5:1 的硬约束失去依据。
 
+   ── 原始变量命名：--suj- 前缀（共存规则，Fix round 1）──────────
+   本层定义的**每一个原始自定义属性**都加 `--suj-` 前缀（--suj-canvas /
+   --suj-ink-1 / --suj-accent / --suj-e-2 / --suj-dur-quick …）。原因：旧
+   src/styles/tokens.css（碳墨暗色，203 处旧 utility 依赖，Track C 才删）在
+   **非分层 :root** 里定义了 --ink-1/--ink-2/--ink-3/--accent/--danger/--warn
+   及三个 *-soft。若本层用同名原始变量，两者都是非分层、特异性 (0,1,0)，纯看
+   源码顺序——本文件在后 → 素笺浅色墨色覆盖旧碳墨值 → 旧页面在浅色主题下
+   `text-ink-1`(#1A1A18) 落在 `bg-bg-3`(#1D2330) 上 = 1.11:1，基本不可读。
+   加前缀后新旧**零重名**，各自独立解析（DESIGN.md §9「新旧 token 层共存规则」）。
+   · Tailwind **utility 名不变**：@theme inline 里 --color-ink1: var(--suj-ink-1)
+     仍产出 text-ink1；后续 Task 2.5–2.9 与 Track C 消费的是 utility 名，不是原始变量。
+   · 前缀只有在 Track C 删除旧 styles/tokens.css 后才可去掉。
+   · 唯一无法加前缀的原始名是 --font-mono（它是 font-mono utility 的 @theme 键，
+     且旧文件也有同名非分层 :root）——靠文件末尾的非分层重申取胜，见第 6 段。
+
    ── 结构（顺序不可颠倒）────────────────────────────────
    1) light token（:root 与 [data-theme="light"]，设计基准）
    2) dark token（同一套语义名换值，不是第二套设计）
-   3) 主题无关几何（高度 / z 序）
-   4) @theme        —— 几何与字体：给**字面值**
-   5) @theme inline —— 颜色：给**异名变量引用**
+   3) 主题无关原始 token（高度 / z 序 / 行文限宽 / 可缩放正文字号）
+   4) @theme        —— 几何与字体：给**字面值**；三级正文字号引用 --suj-text-*
+   5) @theme inline —— 颜色：给**异名变量引用**（--color-* → var(--suj-*)）
    6) 层叠兜底 —— --font-mono 的非分层重申（见该处注释）
 
    ── 为什么 @theme 与 @theme inline 分工不同 ──────────────
@@ -20,10 +35,10 @@
      是同名自引用 = CSS 变量成环 = guaranteed-invalid（旧 styles/tokens.css
      的真实 bug，已由 R29 删除，本层禁止复现）。
    · 颜色必须随 <html data-theme> 切换，所以语义值定义在 :root / [data-theme="dark"]
-     的**普通规则**里（--canvas / --ink-1 …），再用 @theme inline 把 Tailwind
-     命名空间的 --color-* 映射过去。`inline` 让 utility 直接内联 var(--canvas)
+     的**普通规则**里（--suj-canvas / --suj-ink-1 …），再用 @theme inline 把 Tailwind
+     命名空间的 --color-* 映射过去。`inline` 让 utility 直接内联 var(--suj-canvas)
      而不是 var(--color-canvas)，主题切换才会实时生效；且 --color-canvas 与
-     --canvas **不同名**，不成环。
+     --suj-canvas **不同名**，不成环。
 
    ── 字体栈纪律（DESIGN.md §3.2，旧实现的真 bug）──────────
    `--font-app` / `--font-mono` 各自必须是**单一栈**，CJK 字体排在通用族
@@ -38,7 +53,9 @@
    的直接消费面。Tailwind v4 会 tree-shake 未被源码引用的 theme 变量，而 2.1 阶段
    还没有任何组件引用它们（陈列页在 2.5 才出现），因此在此显式声明为"已使用"，
    保证 ① utility 一定生成、② 对应的 --radius-* / --text-* / --font-* 变量一定
-   落到 :root（scripts/verify-theme.mjs 依赖这点），③ 后续动态拼接的类名不被误删。 */
+   落到 :root（scripts/verify-theme.mjs 依赖这点），③ 后续动态拼接的类名不被误删。
+   注意：这里列的是 **utility 名**（text-ink1 等），不带 --suj- 前缀——前缀只加在
+   原始变量上，utility 名是稳定消费面，永不改名。 */
 @source inline("bg-canvas bg-surface bg-sunken bg-raised bg-scrim border-line border-lineStrong text-ink1 text-ink2 text-ink3 text-inkInverse bg-primary text-primary text-accent bg-accentSoft text-danger bg-dangerSoft text-warn bg-warnSoft text-ok bg-okSoft rounded-xs rounded-sm rounded-md rounded-lg rounded-full text-display text-title text-read text-body text-caption text-micro font-app font-mono");
 
 /* ── 1. light（设计基准）· DESIGN.md §2 ───────────────────────── */
@@ -47,41 +64,48 @@
   color-scheme: light;
 
   /* §2.1 表面 */
-  --canvas: #FBFBFA;      /* 应用底：1% 暖白，避开纯白眩光 */
-  --surface: #FFFFFF;     /* 面板/卡片/表格底 */
-  --sunken: #F4F4F2;      /* 输入框、时间码井、hover 行 */
-  --raised: #FFFFFF;      /* 浮层 popover/drawer/modal/toast */
+  --suj-canvas: #FBFBFA;      /* 应用底：1% 暖白，避开纯白眩光 */
+  --suj-surface: #FFFFFF;     /* 面板/卡片/表格底 */
+  --suj-sunken: #F4F4F2;      /* 输入框、时间码井、hover 行 */
+  --suj-raised: #FFFFFF;      /* 浮层 popover/drawer/modal/toast */
 
   /* §2.2 线（面板不使用任何线） */
-  --line: rgba(24, 24, 22, .10);
-  --line-strong: rgba(24, 24, 22, .18);
+  --suj-line: rgba(24, 24, 22, .10);
+  --suj-line-strong: rgba(24, 24, 22, .18);
 
-  /* §2.3 文本 —— 对 --surface 对比度 17.4 / 7.5 / 5.1，三级全部过 AA */
-  --ink-1: #1A1A18;
-  --ink-2: #55554F;
-  --ink-3: #6E6E68;
-  --ink-inverse: #FBFBFA;
+  /* §2.3 文本 —— 对 --suj-surface 对比度 17.4 / 7.5 / 5.1，三级全部过 AA */
+  --suj-ink-1: #1A1A18;
+  --suj-ink-2: #55554F;
+  --suj-ink-3: #6E6E68;
+  --suj-ink-inverse: #FBFBFA;
 
   /* §2.4 交互色与语义色 */
-  --primary: #1A1A18;     /* 主按钮墨块实底，不带彩色 */
-  --accent: #2B4A8B;      /* 钢笔蓝 8.6:1 —— 只用于焦点环/链接/术语高亮/选中行左缘条/流式光标 */
-  --danger: #B42318;      /* 6.6:1 */
-  --warn: #8A6212;        /* 5.5:1 */
-  --ok: #2E6B4F;          /* 6.3:1 */
+  --suj-primary: #1A1A18;     /* 主按钮墨块实底，不带彩色 */
+  --suj-accent: #2B4A8B;      /* 钢笔蓝 8.6:1 —— 只用于焦点环/链接/术语高亮/选中行左缘条/流式光标 */
+  --suj-danger: #B42318;      /* 6.6:1 */
+  --suj-warn: #8A6212;        /* 5.5:1 */
+  --suj-ok: #2E6B4F;          /* 6.3:1 */
 
   /* soft 底（badge 背景 / 选中行底）：light 8% */
-  --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
-  --danger-soft: color-mix(in srgb, var(--danger) 8%, transparent);
-  --warn-soft: color-mix(in srgb, var(--warn) 8%, transparent);
-  --ok-soft: color-mix(in srgb, var(--ok) 8%, transparent);
+  --suj-accent-soft: color-mix(in srgb, var(--suj-accent) 8%, transparent);
+  --suj-danger-soft: color-mix(in srgb, var(--suj-danger) 8%, transparent);
+  --suj-warn-soft: color-mix(in srgb, var(--suj-warn) 8%, transparent);
+  --suj-ok-soft: color-mix(in srgb, var(--suj-ok) 8%, transparent);
 
-  /* §4.4 层级：--e-0 是面板默认（禁止给面板加阴影） */
-  --e-0: none;
-  --e-2: 0 1px 2px rgba(24, 24, 22, .06), 0 8px 24px rgba(24, 24, 22, .10);
-  --e-3: 0 2px 4px rgba(24, 24, 22, .08), 0 16px 48px rgba(24, 24, 22, .14);
+  /* §2.4 文本选区色（Fix round 1 补规格）：--suj-accent-soft 只有 8%，当选区高亮
+     几乎看不见，故用 24% accent 派生。引用 var(--suj-accent)，深色主题下自动跟随
+     深色 accent（#8AA6E8 的 24%），无需在 dark 块另写一份。base.css 的 ::selection 消费它。 */
+  --suj-selection: color-mix(in srgb, var(--suj-accent) 24%, transparent);
+
+  /* §4.4 层级：--suj-e-0 是面板默认（禁止给面板加阴影）
+     --suj-e-1 供 §5.3 Segmented 选中态（比 e-2 更低的一层微升），Fix round 1 补齐。 */
+  --suj-e-0: none;
+  --suj-e-1: 0 1px 2px rgba(24, 24, 22, .06);
+  --suj-e-2: 0 1px 2px rgba(24, 24, 22, .06), 0 8px 24px rgba(24, 24, 22, .10);
+  --suj-e-3: 0 2px 4px rgba(24, 24, 22, .08), 0 16px 48px rgba(24, 24, 22, .14);
 
   /* §5.9 Scrim */
-  --scrim: rgba(24, 24, 22, .32);
+  --suj-scrim: rgba(24, 24, 22, .32);
 }
 
 /* ── 2. dark：同一套语义 token 换值，不是第二套设计 · DESIGN.md §2 dark 列 ──
@@ -90,74 +114,89 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --canvas: #131312;
-  --surface: #1A1A19;
-  --sunken: #101010;
-  --raised: #20201F;
+  --suj-canvas: #131312;
+  --suj-surface: #1A1A19;
+  --suj-sunken: #101010;
+  --suj-raised: #20201F;
 
-  --line: rgba(255, 255, 255, .10);
-  --line-strong: rgba(255, 255, 255, .20);
+  --suj-line: rgba(255, 255, 255, .10);
+  --suj-line-strong: rgba(255, 255, 255, .20);
 
-  /* 对 --surface 对比度 14.7 / 7.3 / 4.8，三级全部过 AA */
-  --ink-1: #ECECEA;
-  --ink-2: #A8A8A2;
-  --ink-3: #87877F;
-  --ink-inverse: #131312;
+  /* 对 --suj-surface 对比度 14.7 / 7.3 / 4.8，三级全部过 AA */
+  --suj-ink-1: #ECECEA;
+  --suj-ink-2: #A8A8A2;
+  --suj-ink-3: #87877F;
+  --suj-ink-inverse: #131312;
 
-  --primary: #ECECEA;
-  --accent: #8AA6E8;      /* 7.2:1 */
-  --danger: #E4796E;      /* 6.0:1 */
-  --warn: #D9A441;        /* 7.7:1 */
-  --ok: #6FBF97;          /* 7.9:1 */
+  --suj-primary: #ECECEA;
+  --suj-accent: #8AA6E8;      /* 7.2:1 */
+  --suj-danger: #E4796E;      /* 6.0:1 */
+  --suj-warn: #D9A441;        /* 7.7:1 */
+  --suj-ok: #6FBF97;          /* 7.9:1 */
 
   /* soft 底：dark 14%（深底上 8% 不足以成形） */
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --danger-soft: color-mix(in srgb, var(--danger) 14%, transparent);
-  --warn-soft: color-mix(in srgb, var(--warn) 14%, transparent);
-  --ok-soft: color-mix(in srgb, var(--ok) 14%, transparent);
+  --suj-accent-soft: color-mix(in srgb, var(--suj-accent) 14%, transparent);
+  --suj-danger-soft: color-mix(in srgb, var(--suj-danger) 14%, transparent);
+  --suj-warn-soft: color-mix(in srgb, var(--suj-warn) 14%, transparent);
+  --suj-ok-soft: color-mix(in srgb, var(--suj-ok) 14%, transparent);
 
-  /* §4.4：深色下阴影几乎不可见 → 浮层靠 1px --line-strong 描边分层，
-     用 box-shadow 环表达（组件因此不必在深色下额外写 border，布局不跳）。 */
-  --e-2: 0 0 0 1px var(--line-strong);
-  --e-3: 0 0 0 1px var(--line-strong);
+  /* --suj-selection 引用 var(--suj-accent)，深色下自动是深色 accent 的 24%，无需在此重申。 */
 
-  --scrim: rgba(0, 0, 0, .55);
+  /* §4.4：深色下阴影几乎不可见 → 浮层靠 1px --suj-line-strong 描边分层，
+     用 box-shadow 环表达（组件因此不必在深色下额外写 border，布局不跳）。
+     e-1/e-2/e-3 深色值统一为 0 0 0 1px var(--suj-line-strong)（DESIGN.md §4.4 已记字面值）。 */
+  --suj-e-1: 0 0 0 1px var(--suj-line-strong);
+  --suj-e-2: 0 0 0 1px var(--suj-line-strong);
+  --suj-e-3: 0 0 0 1px var(--suj-line-strong);
+
+  --suj-scrim: rgba(0, 0, 0, .55);
 }
 
-/* ── 3. 主题无关几何 · DESIGN.md §4.1 / §3.5 / §4.3 / §4.4 ────────
-   这些不随主题切换，也不能放进 @theme：`--h-*` / `--z-*` / `--measure-read`
+/* ── 3. 主题无关原始 token · DESIGN.md §4.1 / §3.5 / §4.3 / §4.4 / §3.3 ────
+   这些不随主题切换，也不能放进 @theme：`--suj-h-*` / `--suj-z-*` / `--suj-measure-read`
    不属于任何 Tailwind 命名空间，不会生成 utility，而 Tailwind v4 会把"未被
    utility 引用"的 theme 变量从产物里 tree-shake 掉，运行时就读不到了。
    放普通 :root 才是可靠的。
    §4.1 的 4px 间距基线（4/8/12/16/24/32/48/64/96）由 Tailwind 默认
    --spacing: .25rem 直接给出（p-1/p-2/p-3/p-4/p-6/p-8/p-12/p-16/p-24），无需另立 token。
 
-   命名说明：§4.3 的高度与 §4.4 的 z 序在 DESIGN.md 里有**字面值但没有 token 名**，
-   下面的名字是本层按同一风格补的（值逐字照抄）。之所以必须立 token：DESIGN.md §10
-   禁止 Tailwind 任意值（`h-[32px]` / `z-[30]`），没有 token 后续原语就只能违规。 */
+   命名说明：§4.3 的高度、§4.4 的 z 序、§3.5 的行文限宽在 DESIGN.md 里有**字面值**，
+   token 名由本层补齐并已回写进 DESIGN.md（Fix round 1），值逐字照抄。之所以必须立 token：
+   DESIGN.md §10 禁止 Tailwind 任意值（`h-[32px]` / `z-[30]` / `max-w-[72ch]`），
+   没有 token 后续原语就只能违规。 */
 :root {
   /* §4.3 高度 */
-  --h-control-sm: 28px;   /* 表格行内操作、紧凑控件 */
-  --h-control: 32px;      /* 按钮/输入/seg 默认 */
-  --h-control-lg: 36px;   /* 主 CTA（引导、空态） */
-  --h-row: 32px;          /* 操作态表格行 */
-  --h-row-lg: 40px;       /* 舒适态表格行（历史列表） */
-  --h-rail: 56px;         /* 左导航宽 */
-  --h-status: 32px;       /* 状态栏 */
+  --suj-h-control-sm: 28px;   /* 表格行内操作、紧凑控件 */
+  --suj-h-control: 32px;      /* 按钮/输入/seg 默认 */
+  --suj-h-control-lg: 36px;   /* 主 CTA（引导、空态） */
+  --suj-h-row: 32px;          /* 操作态表格行 */
+  --suj-h-row-lg: 40px;       /* 舒适态表格行（历史列表） */
+  --suj-h-rail: 56px;         /* 左导航宽 */
+  --suj-h-status: 32px;       /* 状态栏 */
 
   /* §3.5 行文限宽：阅读区文本块 max-width，在栏内居中。
      大面积留白靠限制行文宽度产生，不靠加 padding。 */
-  --measure-read: 72ch;
+  --suj-measure-read: 72ch;
 
   /* §4.4 z 序：面板 0 → popover 10 → drawer 20 → modal 30 → toast 40 → palette 50 */
-  --z-popover: 10;
-  --z-drawer: 20;
-  --z-modal: 30;
-  --z-toast: 40;
-  --z-palette: 50;
+  --suj-z-popover: 10;
+  --suj-z-drawer: 20;
+  --suj-z-modal: 30;
+  --suj-z-toast: 40;
+  --suj-z-palette: 50;
+
+  /* §3.3 可缩放正文字号（原始值）。theme.ts 的 applyFontSize() 运行时在 <html> 上
+     写内联 --suj-text-read/body/caption（系数 0.92/1.0/1.1）覆盖这三个；下方 @theme 的
+     --text-read/body/caption 引用它们，于是 text-read/body/caption utility 与 base.css 的
+     body 字号一起跟随。--text-display/--text-title/--text-micro 不参与缩放，直接在 @theme 给字面值。 */
+  --suj-text-read: 15.5px;
+  --suj-text-body: 13.5px;
+  --suj-text-caption: 12px;
 }
 
-/* ── 4. 几何 / 字体 / 字阶：@theme 内一律给字面值 ───────────────── */
+/* ── 4. 几何 / 字体 / 字阶：@theme 内一律给字面值 ─────────────────
+   唯一例外：三级可缩放正文字号引用 --suj-text-*（见第 3 段说明），
+   以便 applyFontSize() 的内联覆盖能穿透到 utility。 */
 @theme {
   /* §4.2 圆角（4 步，禁止任意值） */
   --radius-xs: 3px;      /* tooltip */
@@ -166,7 +205,9 @@
   --radius-lg: 14px;     /* modal、drawer、toast */
   --radius-full: 999px;  /* 仅状态点、badge、switch */
 
-  /* §3.2 字体栈（单一栈，CJK 在通用族之前——见文件头"字体栈纪律"） */
+  /* §3.2 字体栈（单一栈，CJK 在通用族之前——见文件头"字体栈纪律"）
+     --font-app / --font-mono 是 font-app / font-mono utility 的 @theme 键，**不改名**
+     （改名会连带改 utility 名）。--font-mono 与旧文件同名，靠第 6 段的非分层重申取胜。 */
   --font-app: 'Inter', 'Microsoft YaHei UI', 'Source Han Sans CN', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
 
@@ -179,18 +220,18 @@
   --text-title--line-height: 22px;
   --text-title--font-weight: 600;
 
-  /* --text-read 仅用于译文/原文阅读区；applyFontSize() 会运行时改写它 */
-  --text-read: 15.5px;
+  /* --text-read 仅用于译文/原文阅读区；applyFontSize() 运行时改写 --suj-text-read */
+  --text-read: var(--suj-text-read);
   --text-read--line-height: 1.9;
 
-  /* --text-body 是 UI 默认字号（base.css 的 body 直接消费它）；可被 applyFontSize() 改写 */
-  --text-body: 13.5px;
+  /* --text-body 是 UI 默认字号（base.css 的 body 直接消费 --suj-text-body）；可被 applyFontSize() 改写 */
+  --text-body: var(--suj-text-body);
   --text-body--line-height: 1.6;
 
-  --text-caption: 12px;
+  --text-caption: var(--suj-text-caption);
   --text-caption--line-height: 1.5;
 
-  /* --text-micro 刻意**不参与** applyFontSize() 缩放：
+  /* --text-micro 刻意**不参与** applyFontSize() 缩放（直接给字面值，不引用 --suj-*）：
      表格列宽/表头随字号跳动会让 cue 表在改字号时整列重排 */
   --text-micro: 11px;
   --text-micro--line-height: 1.4;
@@ -198,32 +239,34 @@
 }
 
 /* ── 5. 颜色：@theme inline + 异名变量 ─────────────────────────────
-   --color-* 与 --* 不同名，无环；inline 让 utility 直接引用语义变量，
-   于是 <html data-theme> 一切换，所有已渲染的 utility 立即换值。 */
+   --color-* 与 --suj-* 不同名，无环；inline 让 utility 直接引用语义变量，
+   于是 <html data-theme> 一切换，所有已渲染的 utility 立即换值。
+   左侧 --color-* 是 Tailwind utility 命名空间（产出 bg-canvas / text-ink1 …，名字不变），
+   右侧 var(--suj-*) 是本层的原始语义变量。 */
 @theme inline {
-  --color-canvas: var(--canvas);
-  --color-surface: var(--surface);
-  --color-sunken: var(--sunken);
-  --color-raised: var(--raised);
-  --color-scrim: var(--scrim);
+  --color-canvas: var(--suj-canvas);
+  --color-surface: var(--suj-surface);
+  --color-sunken: var(--suj-sunken);
+  --color-raised: var(--suj-raised);
+  --color-scrim: var(--suj-scrim);
 
-  --color-line: var(--line);
-  --color-lineStrong: var(--line-strong);
+  --color-line: var(--suj-line);
+  --color-lineStrong: var(--suj-line-strong);
 
-  --color-ink1: var(--ink-1);
-  --color-ink2: var(--ink-2);
-  --color-ink3: var(--ink-3);
-  --color-inkInverse: var(--ink-inverse);
+  --color-ink1: var(--suj-ink-1);
+  --color-ink2: var(--suj-ink-2);
+  --color-ink3: var(--suj-ink-3);
+  --color-inkInverse: var(--suj-ink-inverse);
 
-  --color-primary: var(--primary);
-  --color-accent: var(--accent);
-  --color-accentSoft: var(--accent-soft);
-  --color-danger: var(--danger);
-  --color-dangerSoft: var(--danger-soft);
-  --color-warn: var(--warn);
-  --color-warnSoft: var(--warn-soft);
-  --color-ok: var(--ok);
-  --color-okSoft: var(--ok-soft);
+  --color-primary: var(--suj-primary);
+  --color-accent: var(--suj-accent);
+  --color-accentSoft: var(--suj-accent-soft);
+  --color-danger: var(--suj-danger);
+  --color-dangerSoft: var(--suj-danger-soft);
+  --color-warn: var(--suj-warn);
+  --color-warnSoft: var(--suj-warn-soft);
+  --color-ok: var(--suj-ok);
+  --color-okSoft: var(--suj-ok-soft);
 }
 
 /* ── 6. 层叠兜底：--font-mono 的非分层（unlayered）重申 ────────────
@@ -231,10 +274,13 @@
    `:root { --font-mono: 'IBM Plex Mono', … }` 是**非分层**规则。按 CSS 层叠规则
    非分层规则恒胜任何 @layer 内的规则——与源码顺序无关。也就是说，仅靠
    main.tsx 的"旧→新"导入顺序**不足以**让新字体栈生效。
-   这里以非分层 :root 重申同一份字面值（值必须与上面 @theme 内的保持逐字一致），
+   这里以非分层 :root 重申同一份字面值（值必须与上面 @theme 内的 --font-mono 保持逐字一致），
    非分层 vs 非分层才回到源码顺序比较，新文件在后 → 新值胜出。
+   --font-mono 是本层唯一**不能加 --suj- 前缀**的原始名：它是 font-mono utility 的
+   @theme 键，改名会变成 font-suj-mono。所以它保留原名，用这条重申压住旧文件的同名 :root。
    R29 删除的旧 `@theme inline { --font-mono: var(--font-mono) }` 自引用是同一个
-   bug 的另一半；两半都要处理。scripts/verify-theme.mjs 的断言 #6 是这条的回归锁。
+   bug 的另一半；两半都要处理。scripts/verify-theme.mjs 的断言 #6 是这条的回归锁
+   （实测 .font-mono.num 的 computed font-family 是 JetBrains Mono 栈，非 IBM Plex）。
    位置无关（非分层规则只与同为非分层的旧 :root 比源码顺序），放在文件末尾只为
    让 1–6 的编号与阅读顺序一致。 */
 :root {

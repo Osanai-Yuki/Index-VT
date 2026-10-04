@@ -47,15 +47,16 @@ body,
 }
 
 body {
-  /* 单一栈 var(--font-app)：CJK 在通用族之前，见 tokens.css 文件头"字体栈纪律" */
+  /* 单一栈 var(--font-app)：CJK 在通用族之前，见 tokens.css 文件头"字体栈纪律"。
+     --font-app 是 font-app utility 的 @theme 键（不加 --suj- 前缀，改名会连带改 utility 名）。 */
   font-family: var(--font-app);
-  /* UI 默认字号 = §3.3 的 --text-body（13.5px）。applyFontSize() 通过在 <html> 上
-     写内联 --text-body 来整体缩放，此处无需改动即可跟随。 */
-  font-size: var(--text-body);
+  /* UI 默认字号 = §3.3 的 --suj-text-body（13.5px）。applyFontSize() 通过在 <html> 上
+     写内联 --suj-text-body 来整体缩放，此处无需改动即可跟随。 */
+  font-size: var(--suj-text-body);
   line-height: var(--text-body--line-height, 1.6);
   font-weight: 400;
-  background-color: var(--canvas);
-  color: var(--ink-1);
+  background-color: var(--suj-canvas);
+  color: var(--suj-ink-1);
   /* ClearType 下小字号做次像素抗锯齿会更糊 */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -65,17 +66,18 @@ body {
    任何 outline: none 必须同时给出替代的可见焦点样式。
    此处刻意**不分层**，使其优先于 utility 层的 outline-none。 */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--suj-accent);
   outline-offset: 2px;
 }
 
-/* ── 文本选区 ─────────────────────────────────────────────────
-   DESIGN.md 未给选区色。--accent-soft 只有 8%/14%，作为选区几乎不可见，
-   因此这里用 24% accent 的 color-mix 派生（仍是 token 派生，非硬编码色值）。
-   已在 Task 2.1 报告中记为"DESIGN.md 待补规格"。 */
+/* ── 文本选区（DESIGN.md §2.4 的 --selection token）──────────────
+   用 tokens.css 定义的 --suj-selection（= color-mix(in srgb, --suj-accent 24%, transparent)）。
+   --suj-accent-soft 只有 8%/14%，当选区几乎不可见，故 selection 用 24% accent 派生；
+   仍是 token 派生、非硬编码色值，能过 §10 的漂移防线。深色主题下 --suj-selection
+   引用深色 --suj-accent 自动跟随。 */
 ::selection {
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
-  color: var(--ink-1);
+  background: var(--suj-selection);
+  color: var(--suj-ink-1);
 }
 
 /* ── 数字排版（DESIGN.md §3.4，本类工具性价比最高的一条）────────
@@ -87,16 +89,21 @@ body {
 }
 
 /* ── elevation 工具类（DESIGN.md §4.4）──────────────────────────
-   面板默认 --e-0（none）：**禁止给面板加阴影或边框**，层级只由
-   surface 浮在 canvas 上 + 间距表达。只有浮层家族用 .e-2 / .e-3。
-   深色主题下 --e-2/--e-3 已在 tokens.css 内换值为 1px 描边环，
-   因此组件不必为主题分支写两套样式，布局也不会因为多一条 border 而跳动。 */
+   面板默认 --suj-e-0（none）：**禁止给面板加阴影或边框**，层级只由
+   surface 浮在 canvas 上 + 间距表达。浮层家族用 .e-2 / .e-3；.e-1 供
+   §5.3 Segmented 选中态一类的低层微升。深色主题下 --suj-e-1/2/3 已在
+   tokens.css 内换值为 1px 描边环，因此组件不必为主题分支写两套样式，
+   布局也不会因为多一条 border 而跳动。 */
+.e-1 {
+  box-shadow: var(--suj-e-1);
+}
+
 .e-2 {
-  box-shadow: var(--e-2);
+  box-shadow: var(--suj-e-2);
 }
 
 .e-3 {
-  box-shadow: var(--e-3);
+  box-shadow: var(--suj-e-3);
 }
 
 /* ── 滚动条（WebView2 = Chromium，用 -webkit- 前缀即可）────────── */
@@ -110,14 +117,14 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+  background: var(--suj-line-strong);
   border: 2px solid transparent;
   border-radius: var(--radius-full);
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--ink-3);
+  background: var(--suj-ink-3);
   background-clip: content-box;
 }
 
@@ -128,12 +135,13 @@ body {
 /* ── 动效 token（motion-plan.json：Premium，overshoot 0%）────────
    签名缓动唯一一条；duration 只允许 quick / standard / slow 三档。
    空间位移类永不 linear——唯一例外是 spinner 与进度条填充。
-   入场范式统一为 translateY(8px) + opacity，无 scale、无弹性。 */
+   入场范式统一为 translateY(8px) + opacity，无 scale、无弹性。
+   原始变量加 --suj- 前缀（与 tokens.css 同一共存规则，见该文件头）。 */
 :root {
-  --ease-signature: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur-quick: 180ms;
-  --dur-standard: 320ms;
-  --dur-slow: 520ms;
+  --suj-ease-signature: cubic-bezier(0.4, 0, 0.2, 1);
+  --suj-dur-quick: 180ms;
+  --suj-dur-standard: 320ms;
+  --suj-dur-slow: 520ms;
 }
 
 /* ============================================================

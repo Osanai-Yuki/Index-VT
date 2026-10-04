@@ -52,9 +52,11 @@
 | `--ink-1` | `#1A1A18` | `#ECECEA` | **17.4:1 / 14.7:1** |
 | `--ink-2` | `#55554F` | `#A8A8A2` | **7.5:1 / 7.3:1** |
 | `--ink-3` | `#6E6E68` | `#87877F` | **5.1:1 / 4.8:1** |
-| `--ink-inverse` | `#FBFBFA` | `#131312` | 用于 ink 实底按钮上的文字（14.7:1 / 14.7:1） |
+| `--ink-inverse` | `#FBFBFA` | `#131312` | 用于 ink 实底按钮上的文字（对 `--primary` 实底**实测 16.83:1 / 15.72:1**） |
 
 **三级全部过 AA。** 这是硬约束：旧规范把 2.9:1 的 `--ink-3` 用在栏目标题上，属违规，本版不允许任何文本级 token 低于 4.5:1。
+
+> 对比度按 WCAG 2.1 相对亮度公式对字面 hex 实算（`--ink-1/2/3` 对 `--surface`，`--ink-inverse` 对 `--primary` 实底）。Fix round 1 复核：`--ink-inverse` 旧标注「14.7:1 / 14.7:1」有误（那是 dark `--ink-1` 对 `--surface` 的值，疑似串行复制），实测应为 **16.83:1（light）/ 15.72:1（dark）**，已订正；同表其余八行（`--ink-1/2/3` 及 §2.4 的 `--primary/--accent/--danger/--warn/--ok`）复核后与字面值一致（到小数点后一位，偏差均 ≤0.05），不改。
 
 ### 2.4 交互色与语义色
 
@@ -67,6 +69,8 @@
 | `--ok` | `#2E6B4F` | `#6FBF97` | **6.3:1 / 7.9:1** | 完成、校验通过、运行中 |
 
 soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token> 8%, transparent)`，dark 用 14%。token 名 `--accent-soft` / `--danger-soft` / `--warn-soft` / `--ok-soft`。
+
+文本选区（`::selection`）：token `--selection` = `color-mix(in srgb, var(--accent) 24%, transparent)`（实现名 `--suj-selection`，见 §9）；选区文字仍用 `--ink-1`。**理由**：`--accent-soft` 的 8%/14% 作为选区高亮几乎不可见（可用性硬伤），故选区改用 24% accent 派生——仍是 token 派生（过 §10 漂移防线，非硬编码色值），且引用 `var(--accent)`，深色主题下自动跟随深色 accent，无需在 dark 块另写一份。
 
 **禁止**：紫色系、渐变实底、彩虹状态色、第二个品牌色。`--accent` 与 `--danger` 都属暖侧但明度与用法分离（danger 永远在告警容器内并带图标），不得互换。
 
@@ -109,7 +113,7 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 
 ### 3.5 行文限宽
 
-阅读区文本块 `max-width: 72ch` 并在栏内居中。**大面积留白靠限制行文宽度产生，不靠加 padding**——1920 宽下双栏每栏 860px 的中文不可读。
+阅读区文本块 `max-width: 72ch`（token `--measure-read`，实现名 `--suj-measure-read`，见 §9）并在栏内居中。**大面积留白靠限制行文宽度产生，不靠加 padding**——1920 宽下双栏每栏 860px 的中文不可读。§10 禁止 `max-w-[72ch]` 任意值，故必须立此 token，2.5–2.9 与 Track C 一律引用它。
 
 ---
 
@@ -151,15 +155,20 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 | `--h-rail` | 56px（宽） | 左导航 |
 | `--h-status` | 32px | 状态栏 |
 
+> 上表 token 名即契约名（值逐字照抄）。§10 禁止 `h-[32px]` 一类任意值，故必须立 token；2.5–2.9 与 Track C 一律用这些**同名** token。实现层给每个原始变量加 `--suj-` 前缀（`--suj-h-control` 等），见 §9 共存规则。
+
 ### 4.4 层级（elevation）
 
-| Token | 值 | 用途 |
+| Token | light 值 | 用途 |
 |---|---|---|
 | `--e-0` | `none` | **面板默认。禁止给面板加阴影** |
+| `--e-1` | `0 1px 2px rgba(24,24,22,.06)` | Segmented 选中态（§5.3）一类比 e-2 更低的**一层微升** |
 | `--e-2` | `0 1px 2px rgba(24,24,22,.06), 0 8px 24px rgba(24,24,22,.10)` | popover / dropdown |
 | `--e-3` | `0 2px 4px rgba(24,24,22,.08), 0 16px 48px rgba(24,24,22,.14)` | modal / drawer / toast |
 
-深色主题下阴影几乎不可见 → 浮层改用 `1px solid var(--line-strong)` + `--e-2/3` 的深色值（`rgba(0,0,0,.5)` 系）。z 序：面板 0 → popover 10 → drawer 20 → modal 30 → toast 40 → palette 50。
+**深色主题字面值**：阴影在深色下几乎不可见 → `--e-1` / `--e-2` / `--e-3` 的 dark 值**统一显式为** `0 0 0 1px var(--line-strong)`（用 1px 描边环代替阴影分层；以 box-shadow 环表达，组件因此不必为主题分支写两套样式、布局也不会因多一条 border 而跳动）。
+
+**z 序**（下列 token 名为字面值补齐的契约名，值逐字照抄；实现加 `--suj-` 前缀，见 §9）：面板 `--e-0` 层 0 → `--z-popover` 10 → `--z-drawer` 20 → `--z-modal` 30 → `--z-toast` 40 → `--z-palette` 50。§10 禁止 `z-[30]` 任意值，故必须立这些 token，2.5–2.9 与 Track C 一律用同名 token。
 
 ---
 
@@ -329,7 +338,17 @@ grid-template-areas: "rail main" "rail status";
 - 三档：`light` / `dark` / `system`（跟随 `prefers-color-scheme`，运行时监听变化）。后端 `config.Appearance.Theme` **字段已存在但从未被前端使用**，本设计把它接上；`SetConfig` 后立即生效，无需重启。
 - `index.html` 内联首屏背景色 + `<meta name="color-scheme" content="light dark">`，并在 Wails 侧设置 `options.App.BackgroundColour`。
   > 旧实现未设 `BackgroundColour`，Windows 上 WebView2 默认白底；切深色主题会有白闪。浅色基准下不明显，但深色必须修。
-- `@theme` 映射规则（**修旧实现的自引用 bug**）：颜色用 `@theme inline { --color-surface: var(--surface); }`（`--surface` 与 `--color-surface` **不同名**，无环）；几何/字体直接在 `@theme` 内给字面值（`--radius-sm: 6px;`），**禁止** `--radius-sm: var(--radius-sm)` 这类同名自引用。
+- `@theme` 映射规则（**修旧实现的自引用 bug**）：颜色用 `@theme inline { --color-surface: var(--suj-surface); }`（`--suj-surface` 与 `--color-surface` **不同名**，无环）；几何/字体直接在 `@theme` 内给字面值（`--radius-sm: 6px;`），**禁止** `--radius-sm: var(--radius-sm)` 这类同名自引用。原始变量的 `--suj-` 前缀见 §9.1。
+
+### 9.1 新旧 token 层共存规则（`--suj-` 前缀，勿删）
+
+旧 `frontend/src/styles/tokens.css`（碳墨暗色，v1.0 遗留；现存 6 个页面 203 处旧 utility 依赖，**Track C 才整体删除**）**存活期间**，新层（`theme/tokens.css`、`theme/base.css`、`theme/theme.ts`）的**每一个原始自定义属性**都必须加 `--suj-` 前缀，与旧原始变量**零重名**：
+
+- **为什么**：旧 `:root`（非分层）定义了 `--ink-1/--ink-2/--ink-3/--accent/--danger/--warn` 及三个 `*-soft`。新层若用同名原始变量，两者都是非分层、特异性都 (0,1,0)，纯看源码顺序——新文件在后 → 素笺浅色墨色覆盖旧碳墨值 → 旧页面在浅色主题下 `text-ink-1`(#1A1A18) 落在 `bg-bg-3`(#1D2330) 上 = **1.11:1 不可读**（Fix round 1 实测的阻塞缺陷）。
+- **怎么做**：新层原始变量一律 `--suj-*`（如 `--suj-ink-1` / `--suj-accent` / `--suj-selection` / `--suj-e-1` / `--suj-h-control` / `--suj-z-popover` / `--suj-measure-read` / `--suj-text-body` / `--suj-dur-quick`），两条链各自独立解析。本文档 §2/§3/§4 的 token 表一律用**语义名**（`--canvas` / `--ink-1` / `--e-1` / `--h-control` / `--z-popover` / `--measure-read` / `--selection` …）；**实现名 = 语义名加 `--suj-` 前缀**，一一对应。
+- **utility 名永不加前缀、永不改名**：`@theme inline { --color-ink1: var(--suj-ink-1); }` 仍产出 `text-ink1`；`@theme { --text-body: var(--suj-text-body); }` 仍产出 `text-body`。Task 2.5–2.9 与 Track C 消费的是 **utility 名**（`bg-canvas` / `text-ink1` / `rounded-sm` / `font-mono` …），不是原始变量，因此前缀对它们透明。
+- **唯一例外 `--font-mono`**：它是 `font-mono` utility 的 `@theme` 键（加前缀会变成 `font-suj-mono`），且旧文件也有同名非分层 `:root`。靠 `theme/tokens.css` 末尾的**非分层重申**让新层取胜（非分层规则恒胜任何 `@layer theme`；非分层 vs 非分层才回到源码顺序，新文件在后）。回归锁 = `verify-theme.mjs` 断言 #6。
+- **前缀只有在 Track C 删除旧 `styles/tokens.css` 后才可去掉**（届时 `--font-mono` 的非分层重申也可一并删）。在此之前**任何人不得"清理"这个前缀**，否则 1.11:1 缺陷会原样复现。回归锁 = `verify-theme.mjs` 断言 #8（旧变量未被覆盖）/ #9（新变量独立解析）/ #10（旧 utility `bg-bg-3 text-ink-1` 对比度 ≥4.5:1）。
 
 ---
 
