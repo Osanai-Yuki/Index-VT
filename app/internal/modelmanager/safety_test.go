@@ -109,8 +109,8 @@ func TestIsAllowedURLRejectsPlainHTTP(t *testing.T) {
 // TestIsAllowedURLPrivateAndLoopbackLiterals 策略回归锁：IP 字面量形式的环回 /
 // 私网 / 链路本地 / 未指定地址（含 IPv6 与 v4-mapped 写法）一律拒绝；
 // 官方白名单主机（HF / hf.co / ModelScope / OSS）与 https scheme 不受影响。
-// 注意：多数私网 IP 断言在收紧前也会因后缀白名单而通过 —— 真正的 RED 来自
-// http:// 与私有地址策略这两处（见 http:// 与 169.254 全量用例）。
+// 注意：多数私网 IP 断言在收紧前也会因后缀白名单而通过；本用例真正的 RED 只有
+// http:// 两例 —— 169.254/metadata 等 IP 字面量在修复前就已被后缀白名单拒绝。
 func TestIsAllowedURLPrivateAndLoopbackLiterals(t *testing.T) {
 	reject := []string{
 		"http://huggingface.co/a/b.gguf", // 明文 scheme（B18③）
