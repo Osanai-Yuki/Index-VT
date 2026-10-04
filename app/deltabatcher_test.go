@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -83,5 +85,75 @@ func TestDeltaBatcherFlushOrderPreserved(t *testing.T) {
 	defer mu.Unlock()
 	if len(got) != 2 || got[0] != "A" || got[1] != "B" {
 		t.Fatalf("最终顺序错误: got=%v（期望 [A B]）", got)
+	}
+}
+
+// Fix round 1：OnBeforeStop 的 teardown 恢复为「锁内摘 a.deltas → 锁外逐个 go b.close()」
+// （异步等待）。异步不得破坏顺序不变量：
+//   - close() 返回 ⇔ done 已关闭 ⇔ 最终 flush 已在唯一 ticker goroutine 内完成，
+//     且 flushNow 只在 ticker goroutine 里被调用 → 同一 task 的任何两次 emit 必然
+//     同 goroutine 串行，不可能乱序；
+//   - 任务完成路径（Translate 的 goroutine）close 返回后才 emit translate:done，
+//     与 teardown 的 go close 竞争同一 sync.Once/done 也无影响。
+//
+// 测试覆盖 teardown 形状（每个 batcher 从独立 goroutine close，与完成路径并发），
+// 断言「每个 task 的 chunk 序列完整且有序、done 必在所有 chunk 之后」。
+// 确定性：不 sleep 猜时序，断言前 wg.Wait() —— 等齐所有显式完成信号，此后事件序列
+// 不再变化；ticker 在 append 与 close 之间是否发生过 flush 不影响断言（拼接不变）。
+func TestDeltaBatcherAsyncClosePreservesOrder(t *testing.T) {
+	const tasks = 8
+	type rec struct {
+		mu     sync.Mutex
+		events []string
+	}
+	recs := make([]*rec, tasks)
+	batchers := make([]*deltaBatcher, tasks)
+	var wg sync.WaitGroup
+
+	for i := 0; i < tasks; i++ {
+		r := &rec{}
+		recs[i] = r
+		id := strconv.Itoa(i)
+		b := newDeltaBatcher(func(text string) {
+			r.mu.Lock()
+			r.events = append(r.events, text)
+			r.mu.Unlock()
+		})
+		batchers[i] = b
+		b.append("A" + id)
+		if i%2 == 0 {
+			// 完成路径：close 返回（排空完成）后才 emit done，模拟 translate:done。
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				b.close()
+				r.mu.Lock()
+				r.events = append(r.events, "done")
+				r.mu.Unlock()
+			}()
+		}
+	}
+
+	// teardown 形状：锁内已摘出 pending，锁外逐个 go b.close()（本次修复点）。
+	for _, b := range batchers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b.close()
+		}()
+	}
+	wg.Wait() // 每个 batcher 的最终排空与 done 追加都已完成，序列已定格
+
+	for i, r := range recs {
+		r.mu.Lock()
+		got := strings.Join(r.events, "|")
+		r.mu.Unlock()
+		want := "A" + strconv.Itoa(i)
+		if i%2 == 0 {
+			want += "|done"
+		}
+		if got != want {
+			t.Errorf("task %d 异步 close 后事件序列错误: got=%q want=%q", i, got, want)
+		}
 	}
 }

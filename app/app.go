@@ -178,9 +178,12 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 				pending = append(pending, b)
 			}
 			a.mu.Unlock()
-			// close 已幂等（Task 1.1），锁外同步关闭即可，不再 fire-and-forget
+			// close 幂等（sync.Once）且 done 通道保证排空与顺序，与"在哪个 goroutine 等"无关。
+			// 这里必须 go 出去：OnBeforeStop 由持 opMu 的 stopProcLocked 调用，而 close 会等到
+			// 最终 flushNow → runtime.EventsEmit；同步等待即等于"持 opMu 期间跨 JS 桥 emit"，
+			// 违反 spec §7 的「持锁期间不得调用回调或 EventsEmit」。
 			for _, b := range pending {
-				b.close()
+				go b.close()
 			}
 		},
 		OnEvent: func(ev orchestrator.Event) {
