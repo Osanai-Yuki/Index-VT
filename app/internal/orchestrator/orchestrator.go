@@ -6,7 +6,8 @@
 //   - taskMu 保护 activeTasks 计数；任务路径先取 taskMu 递增，再走 EnsureRunning。
 //   - 卸载路径：先取 taskMu 复核 activeTasks==0，再取 opMu 执行停止——
 //     两处都持锁复核，杜绝"停止进行到一半新任务到达"的状态机错乱。
-//   - opMu 串行化 start/stop；EnsureRunning 在 opMu 上等待 Stopping 结束（cond）。
+//   - opMu 串行化 start/stop；EnsureRunning 在 opMu 上轮询等待 Stopping 结束
+//     （waitWhileStoppingLocked；cond 仅作防御性唤醒，见 setState）。
 //
 // 进程拉取安全：可执行文件白名单（仅分发目录内 llama-server.exe）+ 参数净化；
 // CreateProcess 直传转义参数行，不经 shell（spawn_windows.go）。
@@ -135,7 +136,30 @@ func (o *Orchestrator) setState(s OrchestrationState, reason string) {
 	}
 	o.state = s
 	o.log.Info("orchestrator state", "state", s, "reason", reason, "model", o.modelID)
+	// 不变量：任何 cond.Wait 必须有配对唤醒。改用轮询等待后仍保留 Broadcast，
+	// 防止将来别处新增 Wait 又踩同一个坑（B12）。
+	o.cond.Broadcast()
 	o.emit(Event{Kind: "state", State: string(s), Reason: reason, Model: o.modelID})
+}
+
+// waitWhileStoppingLocked 在持有 opMu 时轮询等待卸载结束。
+// 不用 sync.Cond 做等待：-race 不可用，唤醒方一旦漏写就是永久挂起（本次缺陷即如此）；
+// 轮询无此风险。返回 false 表示超时，调用方必须放弃而非在卸载未完成时拉起新进程。
+func (o *Orchestrator) waitWhileStoppingLocked(timeout time.Duration) bool {
+	if o.state != StateStopping {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for o.state == StateStopping {
+		o.opMu.Unlock() // 必须释放，否则 stopProcLocked 拿不到锁，永远等不到状态变化
+		time.Sleep(20 * time.Millisecond)
+		o.opMu.Lock()
+		if time.Now().After(deadline) {
+			o.log.Warn("等待模型释放超时", "timeout", timeout.String())
+			return false
+		}
+	}
+	return true
 }
 
 // ---------- 任务计数（02 文档 §6.1） ----------
@@ -190,8 +214,8 @@ func (o *Orchestrator) KeepAlive() {
 func (o *Orchestrator) EnsureRunning(modelPath, modelID string) (Endpoint, error) {
 	o.opMu.Lock()
 	defer o.opMu.Unlock()
-	for o.state == StateStopping {
-		o.cond.Wait() // 空闲卸载进行中：等它完成，再拉起新进程
+	if !o.waitWhileStoppingLocked(30 * time.Second) {
+		return Endpoint{}, fmt.Errorf("模型释放超时，请稍后重试")
 	}
 	if o.state == StateRunning && o.modelPath == modelPath {
 		return o.endpoint, nil
@@ -234,8 +258,8 @@ func (o *Orchestrator) CurrentModel() string {
 func (o *Orchestrator) Stop(gracefulTimeout time.Duration) error {
 	o.opMu.Lock()
 	defer o.opMu.Unlock()
-	for o.state == StateStopping {
-		o.cond.Wait()
+	if !o.waitWhileStoppingLocked(30 * time.Second) {
+		return fmt.Errorf("模型释放超时")
 	}
 	if o.state == StateIdle {
 		return nil
@@ -315,8 +339,8 @@ func (o *Orchestrator) PrepareExit() error {
 	time.Sleep(500 * time.Millisecond) // 等 SSE 连接断开
 	o.opMu.Lock()
 	defer o.opMu.Unlock()
-	for o.state == StateStopping {
-		o.cond.Wait()
+	if !o.waitWhileStoppingLocked(30 * time.Second) {
+		return fmt.Errorf("模型释放超时")
 	}
 	if o.procHandle != 0 {
 		return o.stopProcLocked("exit")
