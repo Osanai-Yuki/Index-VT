@@ -42,7 +42,7 @@ func (a *App) collectLogsZip() (string, error) {
 		_, _ = w.Write(data)
 	}
 	// 脱敏配置（config 中无用户文本，但同样不包含任何历史/术语数据）
-	cfgJSON, _ := json.MarshalIndent(a.cfg, "", "  ")
+	cfgJSON, _ := json.MarshalIndent(a.cfgSnapshot(), "", "  ")
 	if w, err := zw.Create("config.json"); err == nil {
 		_, _ = w.Write(cfgJSON)
 	}
