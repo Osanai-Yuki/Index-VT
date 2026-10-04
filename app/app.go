@@ -57,11 +57,12 @@ func (a *App) ensureReady() error {
 
 // deltaBatcher translate:delta 50ms 合并窗口（02 文档 §7 现象 A）。
 type deltaBatcher struct {
-	mu     sync.Mutex
-	buf    strings.Builder
-	last   time.Time
-	flush  func(text string)
-	stop   chan struct{}
+	mu       sync.Mutex
+	buf      strings.Builder
+	last     time.Time
+	flush    func(text string)
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 func newDeltaBatcher(flush func(string)) *deltaBatcher {
@@ -98,8 +99,10 @@ func (b *deltaBatcher) flushNow() {
 	}
 }
 
+// close 幂等：OnBeforeStop（热切换/退出）与翻译 goroutine 会并发关闭同一个
+// batcher，sync.Once 保证 stop 只关一次，避免 `close of closed channel` panic。
 func (b *deltaBatcher) close() {
-	close(b.stop)
+	b.stopOnce.Do(func() { close(b.stop) })
 	b.flushNow()
 }
 
