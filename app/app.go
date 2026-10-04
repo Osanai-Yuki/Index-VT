@@ -308,7 +308,12 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 
 	go func() {
 		start := time.Now()
-		res, err := a.tr.Translate(context.Background(), translator.TranslateRequest{
+		// 任务 ctx 必须受应用生命周期约束。旧写法 context.Background() 意味着
+		// 挂死的推理请求永远无法被回收，activeTasks 永久 >0 → 空闲卸载永不触发（B23）。
+		taskCtx, cancel := context.WithCancel(a.ctx)
+		defer cancel()
+
+		res, err := a.tr.Translate(taskCtx, translator.TranslateRequest{
 			TaskID:      taskID,
 			SourceLang:  source,
 			TargetLang:  req.TargetLang,
