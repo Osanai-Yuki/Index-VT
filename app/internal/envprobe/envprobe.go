@@ -3,6 +3,7 @@
 package envprobe
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"indexvt/internal/paths"
@@ -43,18 +45,35 @@ type EnvInfo struct {
 	ProbedAt        int64               `json:"probedAt"`
 }
 
+// runWithTimeout 用 LookPath 解析出的绝对路径执行，并施加超时。
+// 直接用命令名会按 PATH 且含当前工作目录解析（可被同名 DLL/EXE 劫持），
+// 且无超时时一个挂住的 nvidia-smi 会把调用它的 Wails 绑定永久阻塞（B25）。
+func runWithTimeout(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	bin, err := exec.LookPath(name)
+	if err != nil {
+		return nil, fmt.Errorf("找不到可执行文件 %s: %w", name, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = filepath.Dir(bin) // 不让 cwd 参与后续子进程搜索
+	out, err := cmd.Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("%s 执行超时（%s）", name, timeout)
+	}
+	return out, err
+}
+
 // QueryVRAM 读取 nvidia-smi 当前显存数据（用于启动降档与状态栏）。
+// 经 runWithTimeout（绝对路径 + 2s 超时）：挂起的 nvidia-smi 不再能永久
+// 阻塞 Wails 绑定（B25）。
 func QueryVRAM() (GPU, error) {
 	var g GPU
-	if _, err := exec.LookPath("nvidia-smi"); err != nil {
-		return g, fmt.Errorf("nvidia-smi 不可用: %w", err)
-	}
-	cmd := exec.Command("nvidia-smi",
+	out, err := runWithTimeout(2*time.Second, "nvidia-smi",
 		"--query-gpu=name,memory.total,memory.used,memory.free",
 		"--format=csv,noheader,nounits")
-	out, err := cmd.Output()
 	if err != nil {
-		return g, fmt.Errorf("nvidia-smi: %w", err)
+		return g, fmt.Errorf("nvidia-smi 不可用: %w", err)
 	}
 	line := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 	parts := strings.Split(line, ",")
@@ -68,6 +87,35 @@ func QueryVRAM() (GPU, error) {
 	g.UsedMB = atoi(parts[2])
 	g.FreeMB = atoi(parts[3])
 	g.DriverOK = true
+	return g, nil
+}
+
+// queryVRAMProbe 间接层：测试可替换为计数探针来验证 TTL 抑制（控制器裁定 R5），
+// 生产路径恒为 QueryVRAM。
+var queryVRAMProbe = QueryVRAM
+
+type vramCache struct {
+	mu       sync.Mutex
+	at       time.Time
+	val      GPU
+	hasValue bool
+}
+
+var vramCacheState vramCache
+
+// QueryVRAMCached 供状态栏 5s 轮询使用：TTL 内命中缓存则不 spawn 进程（B25）。
+func QueryVRAMCached(ttl time.Duration) (GPU, error) {
+	c := &vramCacheState
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hasValue && !c.at.IsZero() && time.Since(c.at) < ttl {
+		return c.val, nil
+	}
+	g, err := queryVRAMProbe()
+	if err != nil {
+		return GPU{}, err
+	}
+	c.at, c.val, c.hasValue = time.Now(), g, true
 	return g, nil
 }
 
@@ -96,7 +144,8 @@ func SweepResiduals() ResidualSweepResult {
 	}
 	ports, err := winproc.ListenerPortsByPID()
 	if err != nil {
-		// 端口表不可用时退化为双指纹 + 端口不校验？不行——三指纹缺一不杀。
+		// 该分支有实际副作用（B25 Step 5 核对）：放弃本轮清扫并原样返回——三指纹
+		// 缺一不杀，不降级为"双指纹 + 不校验端口"的猜测式清理。
 		return res
 	}
 	for _, p := range procs {
@@ -155,9 +204,8 @@ func Probe() *EnvInfo {
 }
 
 func cpuModel() string {
-	cmd := exec.Command("reg", "query",
+	out, err := runWithTimeout(1*time.Second, "reg", "query",
 		`HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0`, "/v", "ProcessorNameString")
-	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -177,8 +225,7 @@ func probeWebView2() (bool, string) {
 		`HKCU\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`,
 	}
 	for _, k := range keys {
-		cmd := exec.Command("reg", "query", k, "/v", "pv")
-		out, err := cmd.Output()
+		out, err := runWithTimeout(1*time.Second, "reg", "query", k, "/v", "pv")
 		if err != nil {
 			continue
 		}

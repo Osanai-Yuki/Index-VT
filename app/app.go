@@ -623,7 +623,9 @@ func (a *App) GetSystemStatus() (*SystemStatus, error) {
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
-	gpu, _ := envprobe.QueryVRAM()
+	// 5s TTL 缓存：本接口被前端按周期轮询，未经缓存的 QueryVRAM 会每轮 spawn
+	// 一个 nvidia-smi 进程（B25）。Probe() 一次性路径仍直调 QueryVRAM。
+	gpu, _ := envprobe.QueryVRAMCached(5 * time.Second)
 	models := a.models.List()
 	c := a.cfgSnapshot()
 	return &SystemStatus{
