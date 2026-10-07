@@ -17,21 +17,31 @@ Windows 上的全本地 AI 翻译工具。主翻译台、字幕工作台、模�
 
 ---
 
-## 当前状态（2026-10-06）
+## 当前状态（2026-10-07）
 
 | 阶段 | 状态 |
 |---|---|
 | 设计契约（DESIGN.md v2.0「素笺」/ PRD / 动效规范 / spec） | 完成 |
-| Track A 后端止血（B1–B31：崩溃、死锁、丢数据、安全边界） | 已完成并合并 `master`；12 个 Go 包里 10 个有测试且全绿 |
-| Track B 前端地基（双主题 token / 23 原语 / 事件层 / 九道门禁） | 已完成，在分支 `sujian/track-b-frontend-foundation`，尚未合并 |
+| Track A 后端止血（B1–B31：崩溃、死锁、丢数据、安全边界） | 已完成并合并 `master`；13 个 Go 包里 12 个有测试且全绿（唯 `docpipeline` 仍是空壳、无测试） |
+| Track B 前端地基（双主题 token / 23 原语 / 事件层 / 九道门禁） | 已完成并合并 `master`（2026-10-07）；承载它的分支 `sujian/track-b-frontend-foundation` 在 fast-forward 合并后已删除，`master` 现为唯一分支 |
 | **瑞士风格重映射（2026-10-06 用户指令）** | 两层 token 值整体切换为 Swiss International（白底黑字红强调、直角、无阴影/渐变、150ms ease-out、Helvetica 栈）；语义名与 utility 名不变；verify-theme 期望值已同步，九道门禁全绿。B33（引导页死胡同）与 B34（显存轮询控制台弹窗）已修复。**DESIGN.md 已升到 v2.1 并整表同步瑞士值**（含 Inter 弃用、圆角归零、动效改 Clean Cut、§12 差异表） |
 | **Track C 页面迁移（2026-10-06，同日完成）** | 全部页面 + 外壳迁到新设计系统并接线：App/Rail/StatusBar/appStore（事件层 `lib/wails` 全量接线）、主翻译台（R17 错误态保留部分译文·前后端、收藏历史、约束抽屉五字段）、模型中心（未知模型归位 UI、alert/confirm → toast/Modal、nailong/homura 激活收口）、字幕工作台（EV.CUE 译文实时刷新 + SubGetDoc 权威对账、SubGetDoc/SubRetryCues 封装补齐）、设置页（主题/字号真正可改）。旧 `styles/tokens.css` 与旧 `components/ui.tsx` 已删除；lint 白名单 13 行 → 1 行（wailsapi.ts）。九道门禁全绿（verify:wails 探针改开 /?primitives——App 接入新事件层后成为合法订阅者，隔离前提需无订阅页面） |
 | **页面级门禁（2026-10-06）** | 新增 `npm run verify:pages`：真页面在 dev 假后端（`?mock`，`lib/mockbackend.ts`）供数下跑 a11y / 对比度 / 键盘三组断言。首轮即抓出并修掉 4 个真缺陷（详见下）|
 | **翻译模式系统（2026-10-06）** | 主翻译台顶栏"模式"下拉：内置 5 个领域约束模板（通用=官方无约束默认 / 政治经济·社科金融 / 计算机·人工智能 / 人文写作 / 医疗生物，`lib/modes.ts`）；切换即整套预填硬/软约束+文体域，抽屉内手动微调自动落到"自定义"档并记忆。设置页新增「翻译模式」卡片管理自定义模式（增删改，localStorage 持久化）。后端零改动（Constraints 五字段链路 Track C 已通） |
+| **模型下载反馈（2026-10-06）** | 点下载此前毫无反馈：`ListModels` 的 `!anyPresent` 兜底跑在下载分支**之后**，把 `StateDownloading` 冲成 `not-downloaded`（`manager.go`），前端因此既无进度也无"完成"。现改为快照外发 + `DownloadProgress` 随 `ModelInfo` 返回，模型中心有进度条、阶段 toast（含 SHA256 校验中），且**下载完即可启用**（`activatable` 此前硬编 `m.id === 'translate'`）。这条缺陷是新增的 `TestListExposesDownloadProgress` 失败暴露的，不是看出来的 |
+| **显存估算按实测重标（2026-10-06）** | 公式收进 `app/internal/vramestimate`，由设置页预估与 `resolveNGL` 共用（此前两处各写一套且互相对不上账）。旧 `[assumption]` 的 KV 斜率 875 MiB/8K 高估 **9.3 倍**，另有 `int(tokens/8192)` 整除让 2K/4K 档 KV 项恒为 0 —— 叠加后果是把 4GB 卡上真能跑的 32K/64K 一律误判超限。`resolveNGL` 也从「只看权重」改为按 ctx 反推，堵住"剩余显存够小 ctx 不够大 ctx"时下发 `-ngl 99` 导致加载失败的窗口。回归锁 `TestForNeverUnderPredictsMeasured` 用五个实测点**单向**钉住（许高报不许低报） |
+| **M5 长文档：前置调研完成，未开工** | 功能进度仍 ≈ 0（管线空壳、绑定返回占位、前端无入口）。已证实的真正阻塞**不是**上下文容量而是写死的 `max_tokens=1024`（`translator.go:243`）；分块漂移真实存在且随跨度增长，向官方模板【约束要求】追加固定译名表可消除被覆盖实体的漂移，但**用翻译模型通读全文自动生成该表已被证否**。全部结论与复跑口径见 `docs/superpowers/specs/2026-10-06-m5-longdoc-feasibility.md` |
+| **集成与出包（2026-10-07）** | Track B/C 及其后的全部工作以三个提交（`feat(backend)` / `feat(frontend)` / `docs`）fast-forward 进 `master`，分支删除；合并结果上重跑 `go test -count=1`（13 包）、`verify:all`、`verify:pages`，均 exit 0。exe 已重建 |
 
 页面的过渡期结束了：Track C 已把 5 个页面迁完，新旧两层 token 值在 2026-10-06 统一为
-瑞士风格（白底/黑墨/红强调），观感一致。`app/build/bin/Index-VT.exe` 里嵌的前端取决于
-最近一次 `node scripts/build.mjs`，界面与源码不同步时先重新构建再判断。
+瑞士风格（白底/黑墨/红强调），观感一致。
+
+`app/build/bin/Index-VT.exe` 最近一次重建是 **2026-10-07 18:11**（20,568,576 B），当前与
+`master` 源码同步。嵌入自检：整份 JS bundle 与 CSS **逐字节**包含于 exe；`suj-ink-1` 命中 7；
+绿色 `--suj-ok` 的 `#2e6b4f`/`#5fbf8f`、`Archivo`/`Noto Sans SC`、以及本轮新增的功能串
+`下载中`/`仍要使用`/`SHA256 校验中`/`取消下载` 均在；`verify-*` 不在（dev-only 正确出局）。
+界面与源码不同步时先重新构建再判断 —— 只跑 `wails build` 会静默嵌旧前端，必须走
+`node scripts/build.mjs`。
 
 发布约束（更新）：原「Track B 不得单独出包」的成因是旧页面在新色相下跌破对比度，这条已随
 Track C 与两层 token 对齐而解除。要出包仍需重新构建（`node scripts/build.mjs`）并跑一遍

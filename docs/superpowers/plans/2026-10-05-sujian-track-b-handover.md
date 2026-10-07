@@ -4,6 +4,21 @@ Track B 全部 10 个 Task 完成，`npm run verify:all`（九道门禁）exit 0
 `2026-10-04-sujian-track-b-frontend-foundation.md` Task 2.10 Step 5 要求的交接清单，
 Track C（页面重写）开工前应通读。
 
+> **状态（2026-10-07 补记）：Track C 已于 2026-10-06 完成，本文件整体转为「历史记录 + 仍有效的
+> 决策依据」两类混合，读时要分段。** 已合并进 `master`（tip `412f0a5`），承载分支已删。
+>
+> - **仍然有效、照着做**：§① 的导入面约定（但短路径那条已于 2026-10-07 修订，见下）、
+>   §② 的 `_Primitives` 常设保留决定、§⑤ 之后的「计划外决策与偏差记录」（`ALWAYS_ON` 预挂监听、
+>   `errors.ts` 分类词锚点、token 回写 DESIGN.md）—— 这些是当前实现的约束，不是历史。
+> - **已兑现，转为历史记录**：§④ 的 R17/SubGetDoc 交接项、§⑤ 的"未消费"清单（收藏历史、
+>   未知模型归位、约束五字段、`apiSubGetDoc`/`apiSubRetryCues` 封装）全部在 Track C 落地。
+>   不要再按这些条目估工。
+> - **本文原有两处数字/指令已过期**，已就地修订：§③ 的白名单行数、§① 的短路径建议。
+>
+> 门禁靶子那句话（"5 个真实页面不在覆盖内…否则对着空屋子鼓掌"）已经解决：
+> `npm run verify:pages` 用 dev 假后端（`?mock`，`lib/mockbackend.ts`）把五个真实页面
+> 纳入了 a11y / 对比度 / 键盘三组断言，组件层门禁仍指向 `/?primitives`。
+
 ## 提交序列（本 Track）
 
 | Task | Commit | 内容 |
@@ -43,7 +58,14 @@ Track C 迁移完页面后要按 §② 把断言路径改到真实页面，否�
 ## ① 23 个原语（Track C 统一导入面）
 
 并存期**必须**从 `'../components/ui/index'` 导入（旧 `components/ui.tsx` 在模块解析上
-遮蔽 `'../components/ui'` 短路径；Track C 删除旧 ui.tsx 后可改回短路径）。
+遮蔽 `'../components/ui'` 短路径）。
+
+**2026-10-07 修订：短路径不恢复。** 原句"Track C 删除旧 ui.tsx 后可改回短路径"作废。
+旧 ui.tsx 确实已在 Track C 删除，但显式 `ui/index` 保留下来，两个理由：
+① 7 个导入点（App + 6 个页面/组件）当时已统一写成显式形式，只改回一处会成唯一异类；
+② 显式形式对"将来某个工具又生成一个 `components/ui.tsx`"天然免疫，短路径会重新踩同一个
+静默遮蔽坑 —— 那类遮蔽不报错，只是导错了模块。`_Primitives.tsx` 里那条描述并存期的注释
+已于同日删除（它承诺的"改回短路径"正是这条被作废的建议）。
 
 - **交互基础（2.5）**：`Button(kind/size/loading/icon, forwardRef)`、`IconButton(label 必填→aria-label+Tooltip, icon/size/loading)`、`Badge(tone/dot/title)`、`Segmented<T>(options/value/onChange 必填/size/aria-label；radiogroup + 方向键 + Home/End)`、`Switch(checked/onChange/label/srOnly；role=switch)`、`Checkbox(checked/onChange/label/indeterminate；真实 input)`、`Kbd(keys)`、`Spinner(size)`
 - **表单展示（2.6）**：`Field(label 必填/error/hint/size, forwardRef)`、`Textarea(label/error/read→15.5/1.9+72ch 限宽)`、`NumberField(value:number/onChange/min/max/step，.num 右对齐)`、`Slider(value/onChange/min/max/label/formatValue；原生 range+accent)`、`Surface(dense→padding16 否则24)`、`EmptyState(icon 48px lucide/title/body 40ch/action lg)`、`Skeleton(rows)`、`Progress(pct/tone/label；scaleX 填充)`
@@ -73,9 +95,14 @@ Modal 焦点归还失败；`ModelHub` 把 `ListUnknownModels` 当字符串数组
 
 ## ③ lint 白名单（迁移进度度量）
 
-`frontend/scripts/design-lint-legacy.txt` 当前 **13 行**（6 页面 + Rail/StatusBar/ui.tsx +
-LangSelect/App/appStore/wailsapi/styles-tokens.css）。规则：Track C 每迁移完一个文件（改用
-新 token 后）**删一行**；白名单外零容忍；新文件禁止进白名单；非白名单文件命中
+`frontend/scripts/design-lint-legacy.txt` 交接时为 **13 行**（6 页面 + Rail/StatusBar/ui.tsx +
+LangSelect/App/appStore/wailsapi/styles-tokens.css）。
+**2026-10-07 复核：现为 1 行**（只剩 `src/wailsapi.ts`）—— Track C 按下面的规则逐文件迁完后
+把其余 12 行全删了，其中 `ui.tsx` 与 `styles/tokens.css` 是整文件删除而非迁移。
+`wailsapi.ts` 这一行是**永久**的：它是 `declare global` 的类型补全文件，无样式类，
+保留只为免掉"样板式 `any` 用法"误报，不是因为欠债未清。
+
+规则本身仍然有效：**新文件禁止进白名单**；白名单外零容忍；非白名单文件命中
 `legacy-token`（`bg-bg-*` / `text-ink-*` / `*-hairline` / 旧 `*-soft` / `*-line`）即构建失败。
 
 ## ④ Track A 交接项落点
@@ -135,4 +162,5 @@ LangSelect/App/appStore/wailsapi/styles-tokens.css）。规则：Track C 每迁�
    未采纳的动作及理由：修改 Track A 文件以安抚扫描器（越界且有损加固）、手写 ledger
    裁定事件（篡改安全控制记录）、用 `--no-verify`/等价物绕过（扫描器为 ZCode 层钩子，
    亦不可绕）。**留待用户裁定**：或为 testdata/ 配置扫描豁免，或由 Track A 辖区复核后
-   出裁定。本报告与计划勾选更新因此停留在工作区未提交。
+   出裁定。本报告与计划勾选更新当时停留在工作区未提交 —— **已于 2026-10-07 随三个提交入库**
+   （`58a64ff` / `8cafa57` / `412f0a5`，`master` tip `412f0a5`）。

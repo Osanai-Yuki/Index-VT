@@ -1,5 +1,11 @@
 # Track B 前端地基 · 实施计划
 
+> **状态（2026-10-07 补记）：已执行完毕并已合并进 `master`。**
+> Task 1.1–2.10 共 11 个提交（`c467504` … `33556b2`），台账 50/50 全勾、无遗留未勾项 ——
+> 四份计划文件里**只有这一份的勾选框与实际进度相符**，可以直接读。
+> 2026-10-07 连同 Track C 及其后工作一起 fast-forward 进 `master`（tip `412f0a5`），
+> 分支 `sujian/track-b-frontend-foundation` 合并后已删除。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 交付「素笺」设计系统的前端地基——双主题语义 token、23 个全键盘可达的 UI 原语、单点订阅多路分发的 Wails 事件层、以及把 token 漂移拦在构建期的 lint —— 使后续页面重写（Track C）只需组合，不再各自造轮子。

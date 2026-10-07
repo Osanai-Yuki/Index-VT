@@ -1,5 +1,13 @@
 # Track A 后端止血 · 实施计划
 
+> **状态（2026-10-07 补记）：已执行完毕，已于 2026-10-04 合并进 `master`。**
+> 但本文件的 **119 个步骤勾选框一个都没勾**（`- [x]` 计数为 0）—— 执行时用的是「每个 Task
+> 收尾跑全绿 + 提交序列」这套判据，没有回头维护这个 markdown 台账。
+> 因此这里的 `- [ ]` 表示**没勾**，不表示**没做**；判断 Track A 进度请看 `master` 的提交历史
+> 与文末「完成判据」一节，不要拿勾选框当状态。
+> **也不要事后补勾**：本计划自己规定「必须逐条贴出真实输出，不接受『应该没问题』」，
+> 现在补勾等于伪造一份当时没留下的证据，比空着更糟。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 消除会崩溃、死锁、丢数据、破安全边界的后端缺陷，并补齐字幕事件契约（`Translated` 字段），使前端第一次能真实呈现批量翻译结果。

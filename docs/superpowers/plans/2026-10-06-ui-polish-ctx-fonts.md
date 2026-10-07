@@ -10,11 +10,14 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-06-ui-polish-ctx-fonts-design.md`（实施前先读，本计划的每个引用都能在 spec 里找到出处）
 
-**状态：** 已执行完毕（2026-10-06，内联执行）。Task 1–8 步骤全部勾选；人工清单 5/6 已用探针取证，含 exe 重建在内的全部项已完成。
+**状态：** 已执行完毕并已入库（2026-10-06 内联执行 → 2026-10-07 随 Track B/C 一起 fast-forward 进 `master`，落在 `8cafa57 feat(frontend)` 与 `58a64ff feat(backend)`）。Task 1–8 全部步骤已勾选；人工清单 6/6 取证完成（此前本行误记为 5/6，且 Task 8 Step 2 的父框漏勾，而其六个子项都已勾 —— 已于 2026-10-07 补齐）。exe 已在合并后重建，见 Task 8 Step 2 末条。
 
 ## Global Constraints
 
-- **不提交**：本仓库当前约定「只改文件，不提交」。计划里没有 git commit 步骤；需要提交时由用户另行指示。
+- ~~**不提交**：本仓库当前约定「只改文件，不提交」。计划里没有 git commit 步骤；需要提交时由用户另行指示。~~
+  **已于 2026-10-07 由用户显式解除**（在集成流程选定后追加「提交，测试无问题则删除分支」）。
+  注意这条约束管的是**执行阶段**，它当时确实被遵守了 —— 本计划全程没有 commit 步骤；
+  解除发生在**交付阶段**，两者不冲突，不要据此回头改上面的步骤。
 - **门禁全绿是完成定义**：`cd frontend && npm run verify:all`、`npm run verify:pages`、`npm run build`、`cd app && go build ./... && go vet ./... && go test ./...` 四组都过，才算任务完成。
 - **环境**：命令按 Git Bash 写；`verify-a11y.mjs` 的位置参数 `/?…` 会被 MSYS 改写，直调 node 时前置 `MSYS_NO_PATHCONV=1`（经 `npm run` 走 cmd 则不需要）。端口统一 `127.0.0.1:5173`。
 - **`go test -race` 不可用**（`CGO_ENABLED=0`，ADR-001）。任何报告不得声称竞态验证。
@@ -1091,11 +1094,13 @@ cd ../frontend && npm run verify:all && npm run verify:pages && npm run build
 
 **实测结果（2026-10-06，全部 exit 0）**：
 - 后端：`go build` / `go vet` 干净；`go test ./...` 12 包全过（config 从本轮的"无测试"变为有测试；docpipeline 仍是空壳无测试）
+  → **2026-10-07 复核**：同轮之后又新增 `internal/vramestimate`，现为 **13 个包 / 12 个有测试**，
+  在合并后的 `master` 上以 `go test -count=1 ./...` 重跑仍全过。上面那句按当时状态留档，不改。
 - `verify:all`：lint 0 命中、theme 10/10、wails 7/7、lib 24/24、a11y 6/6、datatable 3/3、contrast 全绿、keyboard **PASS 10 / SKIP 0 / FAIL 0**
 - `verify:pages`：a11y **20/20**（critical=0 && serious=0）、contrast 全绿、keyboard **PASS 9 / SKIP 1 / FAIL 0**（SKIP 为 RM2 spinner，组件层已覆盖）
 - `npm run build`：产物含三份字体（18.74KB / 31.43KB / 1.80MB）、CSS 34.73KB、JS 273.14KB
 
-- [ ] **Step 2: 人工清单（逐项打勾，结果写回本计划）**
+- [x] **Step 2: 人工清单（逐项打勾，结果写回本计划）**
 
 - [x] 1180 宽：模型中心顶栏单行；1036 宽：整块换行（T2 探针：1180 行数 1 / 1036 行数 2，按钮宽 147 高 32 且不折字）
 - [x] 历史侧栏条目单行缩略：T1 探针实测 80px（此前 102–154），`clientHeight 22 < scrollHeight 43`，title 已挂
@@ -1106,6 +1111,13 @@ cd ../frontend && npm run verify:all && npm run verify:pages && npm run build
       嵌入自检：`suj-ink-1` 命中 1、`archivo-latin`/`noto-sans-sc-cjk` 各 2、`wOF2` 魔数命中 5、前端入口哈希 `BQZLdinv` 命中 2
       （证明 embed 同步生效）；新增功能串 `显存可能不足` / `约束详情` / `上下文长度` / `EstimateCtxVRAM` 均在。
       注：`clamp-display-conflict` 命中 0 属正确——那是 lint 规则 id，只存在于 `scripts/`，本就不该进包。
+- [x] 重建 exe（2026-10-07 18:11，合并后）：`node scripts/build.mjs` exit 0，exe = 20,568,576 B。
+      自检换了更强的判据 —— 直接断言**整份 JS bundle 与整份 CSS 逐字节包含于 exe**（两条都 true），
+      比数字符出现次数更能证明 embed 同步。另：`suj-ink-1` 命中 7、`#2e6b4f`/`#5fbf8f`（绿色 `--suj-ok`）、
+      `Archivo`/`Noto Sans SC`、新功能串 `下载中`/`仍要使用`/`SHA256 校验中`/`取消下载` 均在，`verify-*` 不在。
+      **踩过的坑，别再踩**：用 `readFileSync(...,'latin1').toLowerCase()` 搜中文串会得到假的 ABSENT ——
+      小写化会破坏多字节 UTF-8 序列。中文/非 ASCII 一律按 `Buffer.from(s,'utf8')` 在 Buffer 上 `includes`，
+      不做任何编码转换。本轮第一次自检就是这样误报过 `2e6b4f` "不在包里"。
 
 - [x] **Step 3: 汇报** → 结论汇总已交付在对话中（2026-10-06）
 

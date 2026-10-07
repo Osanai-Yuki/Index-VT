@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **日期** | 2026-10-04 |
-| **状态** | 待用户审阅（brainstorming 架构路径产物） |
+| **状态** | **已实施完毕并入库**（原写「待用户审阅」已过期，2026-10-07 修订）。B1–B31 由 Track A 落地并 2026-10-04 并入 `master`；B32（tsconfig 严格开关）与前端地基由 Track B 落地；页面迁移由 Track C 落地 —— 后两者 2026-10-07 一并并入 `master`（tip `412f0a5`）。**但本文件的视觉/交互规格部分已被 `docs/03-GUI设计图/DESIGN.md` v2.1 的瑞士重映射取代，凡冲突以 DESIGN.md 为准**；本文件仍然有效的是 B 编号清单（§3.3）、§7 并发不变量与 §8 验证矩阵，三份计划文件都按这些编号回溯 |
 | **上游** | `spark-output/prd/sujian-gui-redesign.md`（需求与验收）· `docs/03-GUI设计图/DESIGN.md`（视觉契约）· `spark-output/context/motion-plan.json`（动效契约） |
 | **下游** | 本文件获批后 → `writing-plans` skill 产出实施计划 |
 | **本文职责** | 架构、模块边界、后端契约变更、数据流、错误处理、并发不变量、测试策略、交付顺序。**不重复** DESIGN.md 的 token 与 PRD 的验收标准 |
