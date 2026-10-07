@@ -1,9 +1,11 @@
-// dev-only 原语陈列页 —— **交付前删除**（Track C 全部页面迁移完成后连同本文件一起删）
+// dev-only 原语陈列页 —— **常设保留**（2026-10-06 决定）
 // ------------------------------------------------------------
-// 入口：/?primitives 查询参数（main.tsx 判定，不进导航、不进产物路由）。
-// 职责：按原语分节渲染**全部变体与全部状态**（hover/focus 无法静态化，
-// 由 :focus-visible 自然呈现）——它是 axe（verify-a11y）的靶子，
-// 也是 2.10 对比度/键盘/reduced-motion 实测的唯一页面。
+// 入口：/?primitives 查询参数（main.tsx 判定，不进导航）。
+// 身份：① 原语速查工具（全部变体与全部状态；hover/focus 无法静态化，
+//   由 :focus-visible 自然呈现）；② 组件层的常设门禁靶子——verify-a11y /
+//   contrast / keyboard / datatable 与 verify-wails 的隔离探针都指向本页。
+//   真实页面的门禁见 npm run verify:pages（?mock 假后端），两者互补，不是替代关系。
+//   因此本页不随页面迁移而删除；若未来要删，须先给上述门禁换靶。
 // 每节 <section aria-labelledby> + 标题；交互组件一律受控。
 import { useMemo, useState } from 'react'
 import { FileText, Inbox, Pause, Pencil, Play, Settings, Trash2 } from 'lucide-react'
@@ -45,8 +47,6 @@ interface DemoRow {
   target: string
   state: 'done' | 'pending' | 'failed'
 }
-// 注意：并存期旧 src/components/ui.tsx 会遮蔽 '../components/ui' 短路径（文件优先于目录），
-// 故显式导入 ui/index；Track C 删除旧 ui.tsx 后可改回短路径。
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (

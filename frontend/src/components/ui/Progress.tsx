@@ -21,10 +21,10 @@ export function Progress({ pct, tone = 'accent', label }: ProgressProps) {
       aria-valuenow={Math.round(clamped)}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="h-1 w-full overflow-hidden rounded-full bg-sunken"
+      className="h-1 w-full overflow-hidden bg-sunken"
     >
       <div
-        className={`h-full rounded-full transition-transform duration-(--suj-dur-standard) ease-(--suj-ease-signature) ${TONE_BG[tone]}`}
+        className={`h-full transition-transform duration-(--suj-dur-standard) ease-(--suj-ease-signature) ${TONE_BG[tone]}`}
         style={{ transform: `scaleX(${clamped / 100})`, transformOrigin: 'left' }}
       />
     </div>

@@ -210,7 +210,11 @@ async function main() {
       }
       window.runtime = window.__fakeRt
     })
-    await page.goto(DEV_URL, { waitUntil: 'domcontentloaded' })
+    /* 打开 /?primitives（陈列页）：它不订阅任何 EV 表事件。
+       曾直接开 / —— Track C 把 App 外壳接到新事件层后，appStore 在挂载时成为
+       model:progress 等事件的合法订阅者，会消费掉本应进入"早到缓冲"的事件，
+       #3a 的"emit 时无订阅者"前提不再成立。分发器隔离测试需要无订阅者的页面。 */
+    await page.goto(`${DEV_URL}?primitives`, { waitUntil: 'domcontentloaded' })
     await page.waitForLoadState('networkidle').catch(() => {})
     results = await page.evaluate(PROBE_STRING)
   } finally {

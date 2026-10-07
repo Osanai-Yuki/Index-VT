@@ -1,4 +1,5 @@
 // 语言选择器：150 语言 + auto，搜索过滤 + 最近使用置顶（01 文档 §6.2）。
+// Track C 迁移版（2026-10-06）：新 token + 真语义按钮（触发器/列表项均可键盘达）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Globe, ChevronDown, Check } from 'lucide-react'
 
@@ -64,28 +65,30 @@ export function LangSelect({
 
   return (
     <div className="relative" ref={ref}>
-      <div
+      <button
+        type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2.5 bg-bg-2 border border-hairline rounded-[10px] px-3.5 py-2 min-w-[150px] cursor-pointer hover:border-hairline-2"
+        aria-expanded={open}
+        className="flex items-center gap-2.5 bg-sunken border border-line px-3.5 py-2 min-w-40 cursor-pointer hover:border-lineStrong transition-colors duration-150"
       >
-        <Globe size={15} className="text-ink-3" />
-        <div className="leading-tight">
-          <b className="text-[13.5px] font-semibold">{cur.zhName}</b>
-          <small className="block font-mono text-[9.5px] text-ink-3 tracking-[.1em] uppercase">
+        <Globe size={15} className="text-ink3" />
+        <span className="leading-tight text-left">
+          <b className="block text-body font-semibold text-ink1">{cur.zhName}</b>
+          <small className="block text-micro text-ink3 tracking-caps uppercase">
             {isSource ? (value === 'auto' ? (detectedName ? `DETECTED · ${detectedName}` : 'AUTO') : cur.enName) : 'TARGET'}
           </small>
-        </div>
-        <ChevronDown size={13} className="ml-1 text-ink-3" />
-      </div>
+        </span>
+        <ChevronDown size={13} className="ml-1 text-ink3" />
+      </button>
       {open && (
-        <div className="absolute top-full mt-1.5 left-0 w-[260px] max-h-[340px] bg-bg-2 border border-hairline-2 rounded-[10px] shadow-[var(--shadow-1)] z-20 flex flex-col overflow-hidden">
-          <div className="p-2 border-b border-hairline">
+        <div className="absolute top-full mt-1.5 left-0 w-65 max-h-85 bg-raised border border-lineStrong z-(--suj-z-popover) flex flex-col overflow-hidden enter-pop">
+          <div className="p-2 border-b border-line">
             <input
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="搜索语言…"
-              className="w-full bg-bg-3 border border-hairline rounded-lg px-2.5 py-1.5 text-xs text-ink-1 outline-none focus:border-accent-line"
+              className="w-full bg-sunken border border-line px-2.5 py-1.5 text-caption text-ink1"
             />
           </div>
           <div className="overflow-auto">
@@ -113,7 +116,7 @@ export function LangSelect({
               />
             ))}
             {filtered.length === 0 && !isSource && (
-              <div className="px-3 py-4 text-xs text-ink-3">无匹配语言</div>
+              <div className="px-3 py-4 text-caption text-ink3">无匹配语言</div>
             )}
           </div>
         </div>
@@ -124,15 +127,16 @@ export function LangSelect({
 
 function Row({ label, sub, selected, onClick }: { label: string; sub: string; selected: boolean; onClick: () => void }) {
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
-      className={`flex items-center gap-2 px-3 py-2 cursor-pointer text-[13px] ${
-        selected ? 'bg-bg-3 text-accent' : 'text-ink-1 hover:bg-bg-3'
+      className={`w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-body text-left bg-transparent border-0 ${
+        selected ? 'bg-sunken text-accent' : 'text-ink1 hover:bg-sunken'
       }`}
     >
       <span className="flex-1">{label}</span>
-      <span className="font-mono text-[9.5px] text-ink-3 tracking-wider uppercase">{sub}</span>
+      <span className="text-micro text-ink3 tracking-caps uppercase">{sub}</span>
       {selected && <Check size={13} className="text-accent" />}
-    </div>
+    </button>
   )
 }

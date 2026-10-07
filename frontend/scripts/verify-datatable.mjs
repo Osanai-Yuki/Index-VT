@@ -2,7 +2,10 @@
 /**
  * DataTable 虚拟化与性能探针（计划 Task 2.9 Step 6 的持久化门禁）
  * ------------------------------------------------------------
- * 陈列页 /?primitives 上的 5000 行演示表，断言：
+ * 定性：**组件级门禁**，靶子是陈列页 /?primitives 上的 5000 行演示表（真实页面没有 5000 行数据）。
+ * 用法：node scripts/verify-datatable.mjs [path]（默认 /?primitives；换页需该页有同名表，否则失败）
+ *
+ * 断言：
  *   1. 虚拟化真的生效：DOM 中实际渲染的 role="row" 数 ≤ 视口行数 + 2×6 缓冲
  *   2. 滚动不出现 >200ms 长任务（PerformanceObserver longtask 采样）
  *   3. 批量选择：表头全选 → 行 checkbox 全部选中（selected.size 透出）
@@ -19,6 +22,7 @@ const FRONTEND = path.resolve(HERE, '..')
 const DEV_HOST = '127.0.0.1'
 const DEV_PORT = Number(process.argv.find((a) => a.startsWith('--port='))?.slice('--port='.length) ?? 5173)
 const DEV_URL = `http://${DEV_HOST}:${DEV_PORT}/`
+const PAGE_PATH = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? '/?primitives'
 
 function probe(url) {
   return new Promise((resolve) => {
@@ -138,7 +142,7 @@ async function main() {
   try {
     const context = await browser.newContext({ viewport: { width: 1366, height: 900 } })
     const page = await context.newPage()
-    await page.goto(`${DEV_URL}?primitives`, { waitUntil: 'domcontentloaded' })
+    await page.goto(DEV_URL + PAGE_PATH.replace(/^\//, ''), { waitUntil: 'domcontentloaded' })
     await page.waitForLoadState('networkidle').catch(() => {})
     /* 等React 挂载 + 陈列页渲染完成 */
     await page.waitForSelector('[role="grid"][aria-label="5000 行虚拟化演示表"]', { timeout: 15_000 })

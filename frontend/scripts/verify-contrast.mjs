@@ -2,12 +2,18 @@
 /**
  * 对比度实测（计划 Task 2.10 Step 1）——不靠 DESIGN.md 的算式，靠真实渲染。
  * ------------------------------------------------------------
- * 遍历陈列页全部文本节点，取 computed color 与**实际有效背景**（沿祖先向上收集
+ * 用法：
+ *   node scripts/verify-contrast.mjs [path[,path...]] [--click-text=导入字幕]
+ *   默认 path = /?primitives（组件层靶子）；页面层靶子用 /?mock&page=…（dev 假后端）。
+ *   --click-text 会在导航后点击首个含该文本的按钮（页面内容需交互才展开时用；
+ *   找不到只提示不报错，按空态扫描 —— 空态也要过对比度）。
+ *
+ * 遍历目标页全部文本节点，取 computed color 与**实际有效背景**（沿祖先向上收集
  * background-color，半透明的 *-soft 底自底向上逐层合成到首个不透明底为止），
  * 按 WCAG 相对亮度算对比度，断言全部 ≥4.5:1（text-micro 不豁免），light/dark 各跑一遍。
  *
  * 跳过：不可见元素、disabled/aria-disabled 控件（WCAG 豁免非活动控件，与 axe 行为一致）。
- * 输出：每主题测量数、最低三档实测值。
+ * 输出：每路径每主题测量数、最低三档实测值。节点数只作展示，不是断言参数。
  */
 import { spawn } from 'node:child_process'
 import http from 'node:http'
@@ -158,8 +164,13 @@ const PROBE_SOURCE = async () => {
 }
 const PROBE_STRING = `(${PROBE_SOURCE.toString()})()`
 
+/* 位置参数：路径（逗号分隔）；开关：--click-text= */
+const PATHS = (process.argv.slice(2).find((a) => !a.startsWith('--')) ?? '/?primitives')
+  .split(',').map((s) => s.trim()).filter(Boolean)
+const CLICK_TEXT = process.argv.find((a) => a.startsWith('--click-text='))?.slice('--click-text='.length) ?? ''
+
 async function main() {
-  console.log('── verify-contrast.mjs · 真实渲染对比度（门槛 ≥4.5:1）──')
+  console.log(`── verify-contrast.mjs · 真实渲染对比度（门槛 ≥4.5:1）· paths=${PATHS.join(' , ')}${CLICK_TEXT ? ` · click=${CLICK_TEXT}` : ''} ──`)
   const chromium = await loadChromium()
   const child = await ensureDevServer()
   const browser = await launchBrowser(chromium)
@@ -168,27 +179,36 @@ async function main() {
   try {
     const context = await browser.newContext({ viewport: { width: 1366, height: 900 } })
     const page = await context.newPage()
-    for (const theme of ['light', 'dark']) {
-      await page.goto(`${DEV_URL}?primitives`, { waitUntil: 'domcontentloaded' })
-      await page.waitForLoadState('networkidle').catch(() => {})
-      await page.evaluate(async ({ mod, t }) => {
-        const m = await import(mod)
-        m.applyTheme(t)
-      }, { mod: THEME_MODULE, t: theme })
-      /* 主题过渡（180ms）会污染取色 → reload 后以冷启动态测量 */
-      await page.reload({ waitUntil: 'domcontentloaded' })
-      await page.waitForLoadState('networkidle').catch(() => {})
-      await page.waitForSelector('main section', { timeout: 15_000 })
+    for (const path of PATHS) {
+      for (const theme of ['light', 'dark']) {
+        await page.goto(DEV_URL + path.replace(/^\//, ''), { waitUntil: 'domcontentloaded' })
+        await page.waitForLoadState('networkidle').catch(() => {})
+        await page.evaluate(async ({ mod, t }) => {
+          const m = await import(mod)
+          m.applyTheme(t)
+        }, { mod: THEME_MODULE, t: theme })
+        /* 主题过渡（180ms）会污染取色 → reload 后以冷启动态测量 */
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        await page.waitForLoadState('networkidle').catch(() => {})
+        /* 通用就绪信号：根节点有内容（组件层与页面层通吃，不绑具体结构） */
+        await page.waitForSelector('#root > *', { timeout: 15_000 })
+        await page.waitForTimeout(300)
+        if (CLICK_TEXT) {
+          const hit = await page.locator(`button:has-text("${CLICK_TEXT}"), a:has-text("${CLICK_TEXT}")`).first().click({ timeout: 3000 }).then(() => true).catch(() => false)
+          console.log(hit ? `· 已点击「${CLICK_TEXT}」` : `· 本页未找到「${CLICK_TEXT}」，按当前态扫描`)
+          if (hit) await page.waitForTimeout(400)
+        }
 
-      const results = await page.evaluate(PROBE_STRING)
-      const sorted = [...results].sort((a, b) => a.ratio - b.ratio)
-      const bad = sorted.filter((r) => r.ratio < 4.5)
-      console.log(
-        `[${theme}] 测量 ${results.length} 个文本节点，最低 3 档：` +
-          sorted.slice(0, 3).map((r) => `${r.ratio.toFixed(2)}:1（"${r.text}"）`).join(' / '),
-      )
-      for (const b of bad) {
-        failures.push(`${theme} "${b.text}" @ ${b.el} = ${b.ratio.toFixed(2)}:1`)
+        const results = await page.evaluate(PROBE_STRING)
+        const sorted = [...results].sort((a, b) => a.ratio - b.ratio)
+        const bad = sorted.filter((r) => r.ratio < 4.5)
+        console.log(
+          `[${path}][${theme}] 测量 ${results.length} 个文本节点，最低 3 档：` +
+            sorted.slice(0, 3).map((r) => `${r.ratio.toFixed(2)}:1（"${r.text}"）`).join(' / '),
+        )
+        for (const b of bad) {
+          failures.push(`${path} ${theme} "${b.text}" @ ${b.el} = ${b.ratio.toFixed(2)}:1`)
+        }
       }
     }
   } finally {

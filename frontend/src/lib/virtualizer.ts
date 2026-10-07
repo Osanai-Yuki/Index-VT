@@ -51,9 +51,9 @@ export function useVirtualRows({ count, rowHeight, overscan = 6 }: VirtualRowsOp
   padTop: number
   padBottom: number
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void
-  containerRef: React.RefObject<HTMLDivElement | null>
+  containerRef: React.RefObject<HTMLDivElement>
 } {
-  const containerRef = useRef<HTMLDivElement | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [clientHeight, setClientHeight] = useState(0)
 

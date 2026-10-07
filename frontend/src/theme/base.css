@@ -11,21 +11,36 @@
    ============================================================ */
 
 /* ── 离线字体（DESIGN.md §3.1）──────────────────────────────────
-   只打包 **latin 子集**（woff2 变体字重轴），CJK 一律走系统栈：
-   思源黑体单字重即 10MB+，与便携布局冲突。
-   `unicode-range` 必须声明且只覆盖 latin 段——否则浏览器会尝试用 Inter
-   渲染中文，落空后才回退，白白多一次匹配并可能选错字形。
+   三份本地 woff2（全部裁到 wght 400–600，`font-display: swap`）：
+   · Archivo（latin 子集，18.3KB）——界面拉丁字，Helvetica 系 Grotesque
+   · Noto Sans SC（CJK 子集，1.72MB）——中文，GB2312 + 假名 + CJK 标点，7994 字形
+   · JetBrains Mono（latin 子集，30.7KB）——`.num` 等宽数字/时间码（功能性需求，非风格选择）
+   Inter 已随 v2.1 弃用并移出仓库。超出 CJK 子集的字（生僻/繁体/韩文）逐字回退系统
+   `Microsoft YaHei UI`——这是 1.72MB 对 16.9MB（Noto SC 全量）的取舍，口径见 DESIGN.md §3.1。
+   `unicode-range` 两边都必须声明：Archivo 只认 latin、Noto 只认 CJK 与假名，
+   互不抢字，也避免浏览器用 CJK 字体去渲染拉丁。
    **禁止**改用 <link> 外链（Google Fonts 等）：本应用是离线桌面应用。
-   合计 77.8KB（Inter 47.1KB + JetBrains Mono 30.7KB）。 */
+   回归锁：verify-theme #7（三份 woff2 均被请求、无站外字体、@font-face 里不得出现 Inter）。 */
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Archivo';
   font-style: normal;
-  font-weight: 400 600;   /* 变体字重轴：一个文件覆盖 §3.3 允许的全部 app 字重 */
+  font-weight: 400 600;
   font-display: swap;
-  src: url('../assets/fonts/inter-latin-wght400-600.woff2') format('woff2');
+  src: url('../assets/fonts/archivo-latin-wght400-600.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
     U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
     U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('../assets/fonts/noto-sans-sc-cjk-wght400-600.woff2') format('woff2');
+  /* 只认 CJK、假名与全角形式；拉丁字形已被子集剔除，即使误置队首也不会渲染拉丁。
+     U+FF00-FFEF 不能漏：全角标点（：（）等）在子集里，漏声明的后果是这些字符逐字回退系统字体。 */
+  unicode-range: U+2E80-303F, U+3040-30FF, U+31C0-33FF, U+3200-32FF, U+4E00-9FFF, U+FF00-FFEF;
 }
 
 @font-face {
@@ -60,6 +75,45 @@ body {
   /* ClearType 下小字号做次像素抗锯齿会更糊 */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* 应用外壳依赖（原 styles/tokens.css，Track C 删除后职责并入本文件） */
+  overflow: hidden;
+  user-select: none;
+}
+
+textarea,
+input {
+  user-select: text;
+}
+
+/* ── 页面切换淡入（瑞士化：opacity only，150ms ease-out）────────── */
+@keyframes suj-screen-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.screen-in {
+  animation: suj-screen-in var(--suj-dur-quick) var(--suj-ease-signature) both;
+}
+
+/* ── 流式打字光标（语义：仍在生成的功能性反馈，非装饰）────────── */
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  background: var(--suj-accent);
+  vertical-align: -2px;
+  margin-left: 2px;
+  animation: suj-caret-blink 1s steps(1) infinite;
+}
+
+@keyframes suj-caret-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 /* ── 焦点环（DESIGN.md §5.12）───────────────────────────────────
@@ -106,64 +160,44 @@ body {
   box-shadow: var(--suj-e-3);
 }
 
-/* ── Skeleton shimmer（DESIGN.md §5.11）────────────────────────
-   opacity .6→1 1200ms ease-in-out（sine 的 CSS 近似），**不用 transform 位移**
-   （避免与内容布局争抢）。reduced-motion 由上方全局降级块接管（停在 opacity 1，
-   骨架仍可见，不会闪成空白）。 */
-@keyframes suj-shimmer {
-  from {
-    opacity: 0.6;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
+/* ── Skeleton（瑞士化：静态占位，无 shimmer 呼吸动画）────────────
+   Swiss 禁装饰动效；骨架保持固定透明度即可表达"占位中"。
+   reduced-motion 全局降级块仍接管（此时本来就无动画）。 */
 .skeleton {
-  animation: suj-shimmer 1200ms ease-in-out infinite alternate;
+  opacity: 0.75;
 }
 
-/* ── 浮层入场（DESIGN.md §5.9）────────────────────────────────
-   Popover：translateY(4px) + opacity，180ms（--suj-dur-quick）。
-   reduced-motion 全局降级块会把它压到瞬时完成（both 填充终态可见），
-   无需在组件里散落判断。Modal/Drawer/Toast 的入场在各自 Task 追加。 */
+/* ── 浮层入场（瑞士化：Clean Cut——只有 opacity，150ms ease-out）──
+   Swiss 禁交互位移/缩放；入场一律纯淡入，无 translateY。 */
 @keyframes suj-pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .enter-pop {
   animation: suj-pop-in var(--suj-dur-quick) var(--suj-ease-signature) backwards;
 }
 
-/* Modal / Drawer / Toast / Scrim 入场（§5.9 字面值）。
-   fill 用 backwards 而非 both：动画结束后不再锁定终态关键帧，
-   ToastHost 的 FLIP 让位位移（inline transform）才能生效。 */
+/* Modal / Drawer / Toast / Scrim 入场：统一 opacity 150ms（--suj-dur-standard）。 */
 @keyframes suj-scrim-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 @keyframes suj-modal-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @keyframes suj-drawer-in {
-  from { opacity: 0; transform: translateX(16px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @keyframes suj-toast-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .enter-scrim {
-  animation: suj-scrim-in 200ms var(--suj-ease-signature) backwards;
+  animation: suj-scrim-in var(--suj-dur-quick) var(--suj-ease-signature) backwards;
 }
 .enter-modal {
   animation: suj-modal-in var(--suj-dur-standard) var(--suj-ease-signature) backwards;
@@ -171,9 +205,9 @@ body {
 .enter-drawer {
   animation: suj-drawer-in var(--suj-dur-standard) var(--suj-ease-signature) backwards;
 }
-/* §5.9 Toast 入场 280ms——组件规格字面值，不属三档 token */
+/* §5.9 Toast 入场原 280ms——瑞士 150ms 上限，统一收口 */
 .enter-toast {
-  animation: suj-toast-in 280ms var(--suj-ease-signature) backwards;
+  animation: suj-toast-in var(--suj-dur-standard) var(--suj-ease-signature) backwards;
 }
 
 /* ── 滚动条（WebView2 = Chromium，用 -webkit- 前缀即可）────────── */
@@ -189,7 +223,7 @@ body {
 ::-webkit-scrollbar-thumb {
   background: var(--suj-line-strong);
   border: 2px solid transparent;
-  border-radius: var(--radius-full);
+  border-radius: 0px; /* Swiss 直角网格：滚动条同样直角 */
   background-clip: content-box;
 }
 
@@ -202,16 +236,15 @@ body {
   background: transparent;
 }
 
-/* ── 动效 token（motion-plan.json：Premium，overshoot 0%）────────
-   签名缓动唯一一条；duration 只允许 quick / standard / slow 三档。
-   空间位移类永不 linear——唯一例外是 spinner 与进度条填充。
-   入场范式统一为 translateY(8px) + opacity，无 scale、无弹性。
-   原始变量加 --suj- 前缀（与 tokens.css 同一共存规则，见该文件头）。 */
+/* ── 动效 token（2026-10-06 瑞士化：Clean Cut Transitions）──────
+   签名缓动 = ease-out（cubic-bezier(0, 0, 0.2, 1)）；duration 上限 150ms
+   （slow 档给 200ms，仍低于风格文档的 300ms 禁线）。空间位移类动效已全部
+   从入场/交互中移除（Rational Restraint：交互只允许颜色与边框色变化）。 */
 :root {
-  --suj-ease-signature: cubic-bezier(0.4, 0, 0.2, 1);
-  --suj-dur-quick: 180ms;
-  --suj-dur-standard: 320ms;
-  --suj-dur-slow: 520ms;
+  --suj-ease-signature: cubic-bezier(0, 0, 0.2, 1);
+  --suj-dur-quick: 150ms;
+  --suj-dur-standard: 150ms;
+  --suj-dur-slow: 200ms;
 }
 
 /* ============================================================

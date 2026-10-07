@@ -15,6 +15,8 @@
  *   legacy-token  bg-bg-3 / text-ink-1 / *-hairline / 旧 *-soft / *-line
  *                                          新文件里用旧 token utility（防新旧混用；
  *                                          旧名清单来自旧 styles/tokens.css 的 @theme 键）
+ *   clamp-display-conflict  line-clamp-* 与 block/flex/grid 同元素
+ *                                          clamp 依赖 display:-webkit-box，被覆盖即静默失效
  *
  * 白名单（并存期机制，DESIGN.md §9 / 计划「并存期的 lint 策略」）：
  *   scripts/design-lint-legacy.txt 一行一个相对 frontend/ 的路径，命中的文件整体跳过。
@@ -50,8 +52,10 @@ const RULES = [
   },
   {
     id: 'arbitrary',
-    re: /(?:text|rounded|p|m|gap|w|h|leading|tracking|border)-\[[^\]]+\]/g,
-    reason: 'Tailwind 任意值 → 用 token utility（字号六级/圆角四级/间距 4px 基线）',
+    // 前缀表含偏移类（left/right/top/bottom/inset）——早先漏了它们，
+    // Rail 激活竖条的 -left-[10px] 因此从防线里溜过去（2026-10-06 补）。
+    re: /(?:text|rounded|p|m|gap|w|h|leading|tracking|border|left|right|top|bottom|inset)-\[[^\]]+\]/g,
+    reason: 'Tailwind 任意值 → 用 token utility（字号六级/圆角四级/间距 4px 基线；偏移用 -left-2.5 一类刻度档）',
   },
   {
     id: 'no-outline',
@@ -85,6 +89,14 @@ const RULES = [
     id: 'legacy-token',
     re: /\b(?:bg-bg-\d|text-ink-\d|(?:bg|text|border|ring)-hairline(?:-2)?\b|(?:bg|text|border|ring)-(?:accent|teal|danger|warn|info)-(?:soft|line)\b)/g,
     reason: '新文件使用旧 token utility → 新代码一律用素笺语义 token（text-ink1 非 text-ink-1）',
+  },
+  {
+    id: 'clamp-display-conflict',
+    /* line-clamp 依赖 display:-webkit-box；同元素再挂显式 display 会让它静默失效。
+       实测：MainTranslate 历史条目的 `block … line-clamp-1` → computed display:block，
+       条目高 102–154px（本应 ~75px）。 */
+    re: /(?:className|class)=[{`"'](?=[^`"'\n]*\bline-clamp-\d)(?=[^`"'\n]*\b(?:block|inline-block|flex|grid)\b)[^`"'\n]*/g,
+    reason: 'line-clamp 与显式 display 同元素 → clamp 失效；去掉 block/flex/grid，clamp 自带 display:-webkit-box',
   },
 ]
 

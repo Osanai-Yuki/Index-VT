@@ -2,15 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import PrimitivesPage from './pages/_Primitives'
-/* CSS 导入顺序 = 层叠顺序，**不可调换**：
-   旧 styles/tokens.css 在前（现存 6 个页面有 203 处旧 utility 依赖它，Track C 才整体删除），
-   新 theme/* 在后。新层原始变量一律加 --suj- 前缀（--suj-ink-1 / --suj-accent / --suj-danger …），
-   与旧的 --ink-1 / --accent / --danger / --warn **零重名** → 两条链各自独立解析，旧页面不再被
-   素笺浅色墨色覆盖（Fix round 1 修复的 1.11:1 不可读缺陷；共存规则见 DESIGN.md §9）。
-   唯一残留的同名原始变量是 --font-mono（font-mono utility 的 @theme 键，不能加前缀），
-   靠 theme/tokens.css 末尾的**非分层重申**让新层取胜——不能只靠导入顺序兜底（见该处注释）。
-   R29 已删掉旧文件 @theme inline 里的六行自引用条目。 */
-import './styles/tokens.css'
+/* CSS 导入顺序（2026-10-06 Track C 收尾）：旧 styles/tokens.css 已随页面迁移完成删除，
+   theme/tokens.css 是唯一 token 权威；base.css 承接文档级默认与动效。 */
 import './theme/tokens.css'
 import './theme/base.css'
 import { applyFontSize, applyTheme, storedFontSize, storedTheme, watchSystemTheme } from './theme/theme'
@@ -26,11 +19,23 @@ watchSystemTheme(() => {
 })
 
 /* dev-only 原语陈列页（Task 2.5）：/?primitives 查询参数判定，不进导航。
-   文件头注明「交付前删除」；此处条件渲染是它唯一的接线点。 */
+   2026-10-06 决定保留：它是原语速查工具，也是 a11y/contrast/keyboard/datatable 四道门禁
+   在组件层的常设靶子（真实页面的门禁见 verify:pages 与 README「验证门禁」）。 */
 const isPrimitivesDemo = new URLSearchParams(window.location.search).has('primitives')
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    {isPrimitivesDemo ? <PrimitivesPage /> : <App />}
-  </React.StrictMode>,
-)
+async function boot() {
+  const params = new URLSearchParams(window.location.search)
+  /* dev-only 假后端：?mock 让真实页面带数据渲染，供页面级门禁使用。
+     动态 import + DEV 守卫 → 生产包不含 mockbackend.ts */
+  if (import.meta.env.DEV && params.has('mock')) {
+    const { installMockBackend } = await import('./lib/mockbackend')
+    installMockBackend()
+  }
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      {isPrimitivesDemo ? <PrimitivesPage /> : <App />}
+    </React.StrictMode>,
+  )
+}
+
+void boot()

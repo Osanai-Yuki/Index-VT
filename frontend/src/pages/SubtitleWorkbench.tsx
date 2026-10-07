@@ -1,10 +1,14 @@
-// 字幕工作台 P0（01 文档 §6.3 / mockups 屏 2）：
+// 字幕工作台 P0（01 文档 §6.3）· Track C 迁移版（2026-10-06）
 // 导入 / 翻译队列（开始/暂停/取消/重试失败）/ 双语三模式 / 导出（格式+编码）。
 // cue 编辑五操作与样式编辑为 M4 范围（F-17/18）。
-import { useCallback, useEffect, useState } from 'react'
-import { Upload } from 'lucide-react'
-import { Btn, Chip, Seg } from '../components/ui'
+// Track C 接线：EV.CUE 实时刷新译文列 + 终态后 SubGetDoc 拉权威快照；
+// alert 全部下线（toast）。事件订阅走 lib/wails 新事件层。
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Clapperboard, Hash, Play, Upload } from 'lucide-react'
+import { Badge, Button, Segmented } from '../components/ui/index'
+import { toast } from '../stores/toastStore'
 import { useAppStore } from '../stores/appStore'
+import { on, EV } from '../lib/wails'
 import {
   apiSubOpen,
   apiSubTranslate,
@@ -12,8 +16,8 @@ import {
   apiSubResumeQueue,
   apiSubCancelQueue,
   apiSubRetryFailed,
+  apiSubGetDoc,
   apiSubExport,
-  eventsOn,
 } from '../wailsapi'
 
 interface Cue {
@@ -36,12 +40,14 @@ interface Doc {
   cues: Cue[]
 }
 
-const STATE_TONE: Record<string, 'on' | 'amber' | 'warn' | 'blue' | 'danger' | 'default'> = {
-  done: 'on',
-  translating: 'amber',
+type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn' | 'danger'
+
+const STATE_TONE: Record<string, BadgeTone> = {
+  done: 'ok',
+  translating: 'warn',
   failed: 'danger',
-  pending: 'default',
-  skipped: 'default',
+  pending: 'neutral',
+  skipped: 'neutral',
 }
 
 function tc(ms: number) {
@@ -52,6 +58,9 @@ function tc(ms: number) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(milli).padStart(3, '0')}`
 }
 
+const errToast = (e: unknown) =>
+  toast.push({ tone: 'error', message: String((e as { message?: string })?.message ?? e) })
+
 export function SubtitleWorkbench({ langs }: { langs: any[] }) {
   const [doc, setDoc] = useState<Doc | null>(null)
   const [targetLang, setTargetLang] = useState('en')
@@ -59,25 +68,44 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
   const [exportFmt, setExportFmt] = useState('SRT')
   const [queueMsg, setQueueMsg] = useState<string | null>(null)
   const [selIdx, setSelIdx] = useState<number | null>(null)
+  // 终态对账：cue 到达终态后去抖拉一次权威快照（队列结束/个别失败的最终文案）
+  const reconcileTimer = useRef<number | null>(null)
 
   const refreshStatus = useAppStore((s) => s.refreshStatus)
 
   useEffect(() => {
-    const off = eventsOn('subtitle:cue', (p: any) => {
-      setDoc((d) =>
-        d
-          ? {
-              ...d,
-              cues: d.cues.map((c) =>
-                c.index === p.cueIndex
-                  ? { ...c, state: p.state, offTarget: p.offTarget, needsCheck: p.needsCheck }
-                  : c,
-              ),
-            }
-          : d,
-      )
+    const off = on(EV.CUE, (p) => {
+      const cue = p as { cueIndex?: number; state?: string; offTarget?: boolean; needsCheck?: boolean; translated?: string }
+      setDoc((d) => {
+        if (!d) return d
+        const cues = d.cues.map((c) =>
+          c.index === cue.cueIndex
+            ? {
+                ...c,
+                state: cue.state ?? c.state,
+                offTarget: cue.offTarget,
+                needsCheck: cue.needsCheck,
+                translated: cue.translated ?? c.translated,
+              }
+            : c,
+        )
+        return { ...d, cues }
+      })
+      // 终态 → 去抖 1s 对账（SubGetDoc 是权威快照：覆写标签回填等后处理在事件外完成）
+      if (cue.state === 'done' || cue.state === 'failed' || cue.state === 'skipped') {
+        if (reconcileTimer.current !== null) window.clearTimeout(reconcileTimer.current)
+        reconcileTimer.current = window.setTimeout(() => {
+          setDoc((cur) => {
+            if (cur) apiSubGetDoc(cur.id).then((fresh) => fresh && setDoc(fresh)).catch(() => {})
+            return cur
+          })
+        }, 1000)
+      }
     })
-    return off
+    return () => {
+      off()
+      if (reconcileTimer.current !== null) window.clearTimeout(reconcileTimer.current)
+    }
   }, [])
 
   const doImport = useCallback(async () => {
@@ -89,7 +117,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
         setQueueMsg(null)
       }
     } catch (e) {
-      alert(String(e))
+      errToast(e)
     }
   }, [])
 
@@ -101,40 +129,45 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
     <div className="flex flex-col gap-3.5 h-full min-h-0 screen-in">
       {/* 工具栏 */}
       <div className="flex items-center gap-2.5 flex-wrap">
-        <Btn onClick={doImport}>
+        <Button onClick={doImport}>
           <Upload size={14} /> 导入字幕
-        </Btn>
+        </Button>
         {doc && (
-          <Chip tone="blue" dot>
-            {doc.path.split(/[\\/]/).pop()} · {doc.cues.length} cues · {doc.format.toUpperCase()}
-          </Chip>
+          <Badge tone="accent" dot>
+            {doc.path.split(/[\\/]/).pop()} · <span className="num">{doc.cues.length}</span> cues · {doc.format.toUpperCase()}
+          </Badge>
         )}
-        <Btn kind="primary" disabled={!doc} onClick={() => apiSubTranslate(doc!.id, queueOpt).then(refreshStatus).catch((e) => alert(e))}>
-          ▶ 全部翻译
-        </Btn>
-        <Btn disabled={!doc} onClick={() => apiSubPauseQueue(doc!.id).catch((e) => alert(e))}>
+        <Button kind="primary" disabled={!doc} onClick={() => apiSubTranslate(doc!.id, queueOpt).then(refreshStatus).catch(errToast)}>
+          <Play size={14} /> 全部翻译
+        </Button>
+        <Button disabled={!doc} onClick={() => apiSubPauseQueue(doc!.id).catch(errToast)}>
           暂停
-        </Btn>
-        <Btn disabled={!doc} onClick={() => apiSubResumeQueue(doc!.id).catch((e) => alert(e))}>
+        </Button>
+        <Button disabled={!doc} onClick={() => apiSubResumeQueue(doc!.id).catch(errToast)}>
           继续
-        </Btn>
-        <Btn disabled={!doc} onClick={() => apiSubCancelQueue(doc!.id)}>
+        </Button>
+        <Button disabled={!doc} onClick={() => apiSubCancelQueue(doc!.id)}>
           取消
-        </Btn>
-        <Btn
+        </Button>
+        <Button
           disabled={!doc}
           onClick={() =>
-            apiSubRetryFailed(doc!.id, queueOpt)
-              .catch((e) => setQueueMsg(String(e)))
+            apiSubRetryFailed(doc!.id, queueOpt).catch((e) => setQueueMsg(String((e as { message?: string })?.message ?? e)))
           }
         >
           重试失败
-        </Btn>
-        <Seg options={['仅译文', '双语双行', '原文另存']} value={bilingual} accentSel onChange={setBilingual} />
+        </Button>
+        <Segmented<string>
+          options={['仅译文', '双语双行', '原文另存']}
+          value={bilingual}
+          aria-label="双语模式"
+          onChange={setBilingual}
+        />
         <select
           value={targetLang}
           onChange={(e) => setTargetLang(e.target.value)}
-          className="bg-bg-3 border border-hairline rounded-lg text-ink-1 px-2.5 py-1.5 text-xs outline-none focus:border-accent-line"
+          aria-label="目标语言"
+          className="bg-sunken border border-line text-ink1 px-2.5 py-1.5 text-caption"
         >
           {langs
             .filter((l) => l.core)
@@ -145,14 +178,19 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
             ))}
         </select>
         {doc && (
-          <Chip tone="on" dot>
-            {doneCount} / {doc.cues.length}
-          </Chip>
+          <Badge tone="ok" dot>
+            <span className="num">{doneCount} / {doc.cues.length}</span>
+          </Badge>
         )}
-        {queueMsg && <Chip tone="danger" dot>{queueMsg}</Chip>}
+        {queueMsg && <Badge tone="danger" dot>{queueMsg}</Badge>}
         <div className="ml-auto flex gap-2.5">
-          <Seg options={['SRT', 'ASS', 'VTT', 'LRC']} value={exportFmt} onChange={setExportFmt} />
-          <Btn
+          <Segmented<string>
+            options={['SRT', 'ASS', 'VTT', 'LRC']}
+            value={exportFmt}
+            aria-label="导出格式"
+            onChange={setExportFmt}
+          />
+          <Button
             kind="primary"
             disabled={!doc}
             onClick={() =>
@@ -160,45 +198,45 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                 format: exportFmt.toLowerCase(),
                 encoding: 'utf-8',
                 bilingual: bilingual === '仅译文' ? 'translation-only' : bilingual === '双语双行' ? 'dual-line' : 'keep-original',
-              }).catch((e) => alert(e))
+              }).catch(errToast)
             }
           >
             导出 / 转换
-          </Btn>
+          </Button>
         </div>
       </div>
 
       {/* 主体 */}
       {!doc ? (
-        <div className="flex-1 grid place-items-center bg-bg-1 border border-hairline rounded-[14px] empty-dots">
+        <div className="flex-1 grid place-items-center bg-surface border border-line">
           <div className="text-center">
-            <div className="text-4xl mb-3">🎬</div>
-            <div className="text-[15px] font-semibold text-ink-2">导入字幕文件开始翻译</div>
-            <div className="text-xs text-ink-3 mt-1.5">
+            <Clapperboard size={40} strokeWidth={1.5} className="mx-auto mb-3 text-ink3" aria-hidden="true" />
+            <div className="text-title text-ink2">导入字幕文件开始翻译</div>
+            <div className="text-caption text-ink3 mt-1.5">
               支持 SRT / ASS / VTT / LRC · 自动识别编码（UTF-8 / GBK）· 双语三模式 · 格式转换导出
             </div>
             <div className="mt-4">
-              <Btn kind="primary" onClick={doImport}>
+              <Button kind="primary" onClick={doImport}>
                 <Upload size={14} /> 导入字幕
-              </Btn>
+              </Button>
             </div>
           </div>
         </div>
       ) : (
         <div className="flex-1 grid gap-4 min-h-0" style={{ gridTemplateColumns: '1.55fr 1fr' }}>
           {/* cue 表格 */}
-          <div className="bg-bg-1 border border-hairline rounded-[14px] flex flex-col overflow-hidden min-h-0">
+          <div className="bg-surface border border-line flex flex-col overflow-hidden min-h-0">
             <div className="px-4 pt-3.5 pb-2 flex items-center gap-2.5">
-              <span className="label">
-                字幕条目 · <b>CUES</b>
+              <span className="text-micro uppercase tracking-caps text-ink3">
+                字幕条目 · <b className="text-ink2 font-medium">CUES</b>
               </span>
-              <span className="font-mono text-[11px] text-ink-3">
+              <span className="num text-micro text-ink3">
                 {doc.format.toUpperCase()} → {exportFmt} 转换就绪
               </span>
             </div>
-            <div className="grid px-3.5 pt-1.5 pb-2 border-b border-hairline font-mono text-[9.5px] tracking-[.12em] text-ink-3 uppercase"
+            <div className="grid px-3.5 pt-1.5 pb-2 border-b border-line text-micro tracking-caps text-ink3 uppercase"
               style={{ gridTemplateColumns: '44px 132px 1fr 1fr 96px', gap: 10 }}>
-              <span>♯</span>
+              <span aria-hidden="true"><Hash size={11} strokeWidth={2} /></span>
               <span>起止时间</span>
               <span>原文</span>
               <span>译文</span>
@@ -206,59 +244,62 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
             </div>
             <div className="flex-1 overflow-auto min-h-0">
               {doc.cues.map((c) => (
-                <div
+                <button
+                  type="button"
                   key={c.index}
                   onClick={() => setSelIdx(c.index)}
-                  className={`grid px-3.5 py-2.5 border-b border-hairline cursor-pointer transition-colors items-center ${
-                    selIdx === c.index ? 'bg-bg-2 shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-bg-2'
+                  className={`w-full grid px-3.5 py-2.5 border-b border-line text-left cursor-pointer transition-colors duration-150 items-center bg-transparent ${
+                    selIdx === c.index ? 'bg-sunken border-l-2 border-l-accent' : 'hover:bg-sunken'
                   }`}
                   style={{ gridTemplateColumns: '44px 132px 1fr 1fr 96px', gap: 10 }}
                 >
-                  <span className="font-mono text-[10.5px] text-ink-3">{String(c.index).padStart(4, '0')}</span>
-                  <span className="font-mono text-[11px] text-ink-2 whitespace-nowrap">
-                    <b className="text-ink-1 font-medium">{tc(c.startMs)}</b> → {tc(c.endMs).slice(3)}
+                  <span className="num text-micro text-ink3">{String(c.index).padStart(4, '0')}</span>
+                  <span className="num text-micro text-ink2 whitespace-nowrap">
+                    <b className="text-ink1 font-medium">{tc(c.startMs)}</b> → {tc(c.endMs).slice(3)}
                   </span>
-                  <span className="text-[12.5px] leading-[1.5] text-ink-2 line-clamp-2">{c.original}</span>
-                  <span className="text-[12.5px] leading-[1.5] text-ink-1 line-clamp-2">{c.translated}</span>
+                  <span className="text-caption text-ink2 line-clamp-2">{c.original}</span>
+                  <span className="text-caption text-ink1 line-clamp-2">{c.translated}</span>
                   <span>
-                    <Chip tone={STATE_TONE[c.state] ?? 'default'} dot>
+                    <Badge tone={STATE_TONE[c.state] ?? 'neutral'} dot>
                       {c.state}
                       {c.offTarget ? ' · off' : ''}
                       {c.needsCheck ? ' · check' : ''}
-                    </Chip>
+                    </Badge>
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
 
           {/* 右侧：选中 cue 详情 */}
-          <div className="bg-bg-1 border border-hairline rounded-[14px] p-4 overflow-auto min-h-0">
+          <div className="bg-surface border border-line p-4 overflow-auto min-h-0">
             {selIdx == null ? (
-              <div className="text-xs text-ink-3 mt-2">点击左侧条目查看详情</div>
+              <div className="text-caption text-ink3 mt-2">点击左侧条目查看详情</div>
             ) : (
               (() => {
                 const c = doc.cues.find((x) => x.index === selIdx)!
                 return (
                   <div className="flex flex-col gap-2.5">
                     <div className="flex justify-between items-center">
-                      <span className="label">CUE #{String(c.index).padStart(4, '0')} · 详情</span>
-                      <Chip tone="on">
-                        {tc(c.startMs)} → {tc(c.endMs)}
-                      </Chip>
+                      <span className="text-micro uppercase tracking-caps text-ink3">
+                        CUE #<span className="num">{String(c.index).padStart(4, '0')}</span> · 详情
+                      </span>
+                      <Badge tone="ok">
+                        <span className="num">{tc(c.startMs)} → {tc(c.endMs)}</span>
+                      </Badge>
                     </div>
-                    <div className="bg-bg-2 rounded-lg p-3 text-[13px] text-ink-2 leading-relaxed">{c.original}</div>
-                    <div className="bg-bg-2 rounded-lg p-3 text-[13px] text-teal leading-relaxed min-h-[44px]">
-                      {c.translated || <span className="text-ink-3">（未翻译）</span>}
+                    <div className="bg-sunken p-3 text-body text-ink2 leading-relaxed">{c.original}</div>
+                    <div className="bg-sunken p-3 text-body text-ok leading-relaxed min-h-11">
+                      {c.translated || <span className="text-ink3">（未翻译）</span>}
                     </div>
                     {c.needsCheck && (
-                      <Chip tone="warn" dot>
+                      <Badge tone="warn" dot>
                         覆写标签回填失败，需人工检查
-                      </Chip>
+                      </Badge>
                     )}
                     {c.styleName && (
-                      <div className="text-xs text-ink-3">
-                        样式: <span className="font-mono text-ink-2">{c.styleName}</span>（样式编辑为 M4 范围）
+                      <div className="text-caption text-ink3">
+                        样式: <span className="text-ink2">{c.styleName}</span>（样式编辑为 M4 范围）
                       </div>
                     )}
                   </div>

@@ -63,6 +63,7 @@ export const apiProbeEnv = () => call<any>('ProbeEnv')
 export const apiGetConfig = () => call<any>('GetConfig')
 export const apiSetConfig = (cfg: unknown) => call<void>('SetConfig', cfg)
 export const apiGetLanguages = () => call<any[]>('GetLanguages')
+export const apiEstimateCtxVRAM = (tokens: number) => call<any>('EstimateCtxVRAM', tokens)
 
 // ---------- 字幕 ----------
 export const apiSubOpen = () => call<any>('SubOpen')
@@ -71,6 +72,8 @@ export const apiSubPauseQueue = (docId: string) => call<void>('SubPauseQueue', d
 export const apiSubResumeQueue = (docId: string) => call<void>('SubResumeQueue', docId)
 export const apiSubCancelQueue = (docId: string) => call<void>('SubCancelQueue', docId)
 export const apiSubRetryFailed = (docId: string, opt: unknown) => call<void>('SubRetryFailed', docId, opt)
+export const apiSubRetryCues = (docId: string, ids: number[], opt: unknown) => call<void>('SubRetryCues', docId, ids, opt)
+export const apiSubGetDoc = (docId: string) => call<any>('SubGetDoc', docId)
 export const apiSubExport = (docId: string, opt: unknown) => call<void>('SubExport', docId, opt)
 
 // ---------- 文档 ----------

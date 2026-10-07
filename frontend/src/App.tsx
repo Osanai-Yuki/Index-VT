@@ -1,22 +1,24 @@
 // App 外壳：Rail + 页面 + StatusBar；首次引导覆盖层；退出释放编排。
 import { useEffect, useState } from 'react'
+import { FileText } from 'lucide-react'
 import { Rail } from './components/Rail'
 import { StatusBar } from './components/StatusBar'
+import { ToastHost } from './components/ui/index'
 import { MainTranslate } from './pages/MainTranslate'
 import { SubtitleWorkbench } from './pages/SubtitleWorkbench'
 import { ModelHub } from './pages/ModelHub'
 import { SettingsPage } from './pages/Settings'
 import { Onboarding } from './pages/Onboarding'
 import { useAppStore, wireEvents, loadInitialConfig } from './stores/appStore'
-import { apiGetLanguages, apiPrepareExit, apiQuit } from './wailsapi'
+import { apiGetLanguages, apiPrepareExit, apiQuit, apiSetConfig } from './wailsapi'
 
 function DocTranslatePlaceholder() {
   return (
-    <div className="h-full grid place-items-center bg-bg-1 border border-hairline rounded-[14px] empty-dots">
+    <div className="h-full grid place-items-center bg-surface border border-line">
       <div className="text-center">
-        <div className="text-4xl mb-3">📄</div>
-        <div className="text-[15px] font-semibold text-ink-2">长文档翻译 · M5 里程碑提供</div>
-        <div className="text-xs text-ink-3 mt-1.5">
+        <FileText size={44} strokeWidth={1.5} className="mx-auto mb-3 text-ink3" aria-hidden="true" />
+        <div className="text-title text-ink2">长文档翻译 · M5 里程碑提供</div>
+        <div className="text-caption text-ink3 mt-1.5">
           Index-Nailong-2B · zh↔en / zh↔ja · ctx 8K/16K/32K · 全文人名一致性
         </div>
       </div>
@@ -66,27 +68,44 @@ export default function App() {
       .finally(() => apiQuit().catch(() => {}))
   }
 
+  // 完成引导必须把 Onboarded 落库：旧版只写 zustand 内存态，Go 侧 config.onboarded
+  // 恒为 false，每次启动都重走引导，第 3 步会再次自动发起模型下载。
+  const completeOnboarding = () => {
+    useAppStore.setState({ onboarded: true })
+    const cfg = useAppStore.getState().cfg
+    if (cfg) {
+      apiSetConfig({ ...cfg, onboarded: true }).catch(() => {})
+    }
+  }
+
   if (exiting) {
     return (
       <div className="h-full grid place-items-center">
         <div className="text-center">
-          <div className="text-[15px] font-semibold text-accent">正在释放模型资源…</div>
-          <div className="text-xs text-ink-3 mt-2 font-mono">CTRL_BREAK → 进程退出 → 显存归零</div>
+          <div className="text-title font-semibold text-accent">正在释放模型资源…</div>
+          <div className="text-caption text-ink3 mt-2">CTRL_BREAK → 进程退出 → 显存归零</div>
         </div>
       </div>
     )
   }
 
   if (onboarded === false) {
-    return <Onboarding onDone={() => useAppStore.setState({ onboarded: true })} />
+    return <Onboarding onDone={completeOnboarding} />
   }
 
   return (
-    <div className="h-full grid app-glow" style={{ gridTemplateColumns: '64px 1fr', gridTemplateRows: '1fr 40px', gridTemplateAreas: '"rail main" "rail statusbar"' }}>
+    <div
+      className="h-full grid app-glow"
+      style={{
+        gridTemplateColumns: 'var(--suj-h-rail) 1fr',
+        gridTemplateRows: '1fr var(--suj-h-status)',
+        gridTemplateAreas: '"rail main" "statusbar statusbar"',
+      }}
+    >
       <div style={{ gridArea: 'rail' }}>
         <Rail />
       </div>
-      <main className="overflow-hidden px-6 pt-5 pb-7" style={{ gridArea: 'main' }}>
+      <main className="overflow-hidden pt-6 pb-8" style={{ gridArea: 'main', paddingInline: 'var(--suj-pad-shell-x)' }}>
         <div key={page} className="h-full screen-in">
           {page === 'translate' && <MainTranslate langs={langs} />}
           {page === 'subtitle' && <SubtitleWorkbench langs={langs} />}
@@ -95,13 +114,15 @@ export default function App() {
           {page === 'settings' && <SettingsPage />}
         </div>
       </main>
-      <div style={{ gridArea: 'statusbar' }}>
+      <div className="min-w-0" style={{ gridArea: 'statusbar' }}>
         <StatusBar />
       </div>
+      {/* 全局 toast 通知（右下角，error 不自动消失） */}
+      <ToastHost />
       {/* 全局状态提示（模型唤醒/崩溃等） */}
       {(orchState === 'starting' || orchState === 'crashed') && (
-        <div className="fixed top-0 left-16 right-0 h-8 flex items-center justify-center font-mono text-[11px] tracking-wider pointer-events-none"
-          style={{ background: orchState === 'crashed' ? 'var(--danger-soft)' : 'var(--accent-soft)', color: orchState === 'crashed' ? 'var(--danger)' : 'var(--accent)' }}>
+        <div className="fixed top-0 left-16 right-0 h-8 flex items-center justify-center text-micro tracking-wider pointer-events-none"
+          style={{ background: orchState === 'crashed' ? 'var(--suj-danger-soft)' : 'var(--suj-accent-soft)', color: orchState === 'crashed' ? 'var(--suj-danger)' : 'var(--suj-accent)' }}>
           {orchState === 'starting' ? '● 模型唤醒中 — llama-server 启动并探活' : '● 推理进程崩溃 — 自动重启失败，请查看日志或重新提交任务'}
         </div>
       )}

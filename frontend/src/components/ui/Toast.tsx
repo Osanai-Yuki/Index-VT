@@ -120,7 +120,9 @@ export function ToastHost() {
     <div
       ref={listRef}
       aria-live="polite"
-      className="pointer-events-none fixed bottom-4 right-4 z-(--suj-z-toast) flex flex-col items-end gap-2"
+      className="pointer-events-none fixed right-4 z-(--suj-z-toast) flex flex-col items-end gap-2"
+      /* 浮在状态栏之上：bottom = 状态栏高 + 16 间距，否则压住版本与隐私徽章 */
+      style={{ bottom: 'calc(var(--suj-h-status) + 16px)' }}
     >
       {toasts.map((t) => (
         <ToastEntry key={t.id} toast={t} />

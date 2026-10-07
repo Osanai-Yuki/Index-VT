@@ -1,5 +1,5 @@
 // Popover —— DESIGN.md §5.9 浮层家族
-// --raised 底 + --e-2 阴影 + radius-md；入场 translateY(4px)+opacity 180ms（.enter-pop）；
+// --raised 底 + --e-2（瑞士下为 1px 描边环） + radius-md；入场 .enter-pop = opacity 150ms（v2.1 已去掉 translateY）；
 // 定位：锚元素下方，空间不足翻转到上方；portal 到 body（躲开页面入场动画的
 // transform 祖先，fixed 才相对视口）。z 序 --suj-z-popover(10)。
 // 无浮动定位库（运行时依赖不变）：打开时按锚 rect + 面板实测高计算一次，

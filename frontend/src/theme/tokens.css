@@ -2,9 +2,10 @@
    素笺 (Blank Sheet) — 语义 token 层 · v2.0
    ------------------------------------------------------------
    权威来源：docs/03-GUI设计图/DESIGN.md §2（色彩）§3（字体）§4（几何）
-   本文件的色值/字号/圆角一律逐字抄写，禁止四舍五入或"改良"：
-   DESIGN.md §2.3 的对比度（light 17.4/7.5/5.1、dark 14.7/7.3/4.8）是对这些
-   字面值实算出来的，改动任何一个数字都会让 ≥4.5:1 的硬约束失去依据。
+   本文件的色值/字号/圆角一律逐字抄写，禁止四舍五入或"改良"。
+   2026-10-06 起为 v2.1 瑞士重映射值（语义名与 utility 名未变）；DESIGN.md §2.3/§2.4 的
+   对比度表（对 surface 与对自身 soft 两列）是对这些字面值实算出来的，
+   改动任何一个数字都要重算——历史上两次违约都是"只按白底算"造成的（ink-3、瑞士红）。
 
    ── 原始变量命名：--suj- 前缀（共存规则，Fix round 1）──────────
    本层定义的**每一个原始自定义属性**都加 `--suj-` 前缀（--suj-canvas /
@@ -58,98 +59,109 @@
    原始变量上，utility 名是稳定消费面，永不改名。 */
 @source inline("bg-canvas bg-surface bg-sunken bg-raised bg-scrim border-line border-lineStrong text-ink1 text-ink2 text-ink3 text-inkInverse bg-primary text-primary text-accent bg-accentSoft text-danger bg-dangerSoft text-warn bg-warnSoft text-ok bg-okSoft rounded-xs rounded-sm rounded-md rounded-lg rounded-full text-display text-title text-read text-body text-caption text-micro font-app font-mono");
 
-/* ── 1. light（设计基准）· DESIGN.md §2 ───────────────────────── */
+/* ── 1. light（设计基准）· 2026-10-06 瑞士国际风格重映射 ────────
+   用户指令（2026-10-06）：整体风格切换为 Swiss International Style
+   （黑白为主 + 红强调 + 可选蓝，直角、无阴影、无渐变、150ms ease-out）。
+   原《素笺》色值已被本层替换；语义名与 utility 名不变，故组件层零改动。
+   对比度均为对下列字面值实算：ink-2 10.4 / ink-3 5.41（白底）、4.75（--sunken 底）/ accent 4.81（白底）。 */
 :root,
 [data-theme="light"] {
   color-scheme: light;
 
-  /* §2.1 表面 */
-  --suj-canvas: #FBFBFA;      /* 应用底：1% 暖白，避开纯白眩光 */
+  /* 表面：全白 + 灰 sunk（Swiss 大量负空间靠白底与留白产生） */
+  --suj-canvas: #FFFFFF;
   --suj-surface: #FFFFFF;     /* 面板/卡片/表格底 */
-  --suj-sunken: #F4F4F2;      /* 输入框、时间码井、hover 行 */
+  --suj-sunken: #F0F0F0;      /* 输入框、hover 行（Guide Line 的 hover:bg-[#f0f0f0]） */
   --suj-raised: #FFFFFF;      /* 浮层 popover/drawer/modal/toast */
 
-  /* §2.2 线（面板不使用任何线） */
-  --suj-line: rgba(24, 24, 22, .10);
-  --suj-line-strong: rgba(24, 24, 22, .18);
+  /* 线：网格线 #CCCCCC，强调线纯黑（Guide Line Extension 的基线/激活两态） */
+  --suj-line: #CCCCCC;
+  --suj-line-strong: #000000;
 
-  /* §2.3 文本 —— 对 --suj-surface 对比度 17.4 / 7.5 / 5.1，三级全部过 AA */
-  --suj-ink-1: #1A1A18;
-  --suj-ink-2: #55554F;
-  --suj-ink-3: #6E6E68;
-  --suj-ink-inverse: #FBFBFA;
+  /* 文本 —— 对 #FFFFFF：ink-2 10.4 / ink-3 5.41，三级全部过 AA。
+     ink-3 从 #767676 调到 #6A6A6A：原值只算过白底（4.54），落在 --sunken #F0F0F0 上
+     实测 3.99:1（主翻译台语言栏 AUTO/TARGET 标签），违反 DESIGN.md §7「三级文本全程 ≥4.5:1」。
+     现值对 sunken 4.75 / 对白 5.41，两种底都留有余量。 */
+  --suj-ink-1: #000000;
+  --suj-ink-2: #404040;
+  --suj-ink-3: #6A6A6A;
+  --suj-ink-inverse: #FFFFFF;
 
-  /* §2.4 交互色与语义色 */
-  --suj-primary: #1A1A18;     /* 主按钮墨块实底，不带彩色 */
-  --suj-accent: #2B4A8B;      /* 钢笔蓝 8.6:1 —— 只用于焦点环/链接/术语高亮/选中行左缘条/流式光标 */
-  --suj-danger: #B42318;      /* 6.6:1 */
-  --suj-warn: #8A6212;        /* 5.5:1 */
-  --suj-ok: #2E6B4F;          /* 6.3:1 */
+  /* 语义：红 = 强调+危险（瑞士红），蓝 = 警示/信息（可选强调 #0057B8），
+     ok = 墨绿（就绪 / 通过）。红取 #D40000 而非 #FF0000 或 #E60000：
+     文本级 token 必须在**它出现的每一种底**上都过 AA。实测——#FF0000 白底 4.0；
+     #E60000 白底 4.81 但压在 soft 6%（#FEF0F0）仅 4.34、压在 --sunken 4.22，均跌破；
+     #D40000 白底 5.53 / soft 4.98 / sunken 4.85，全部达标（2026-10-06 页面门禁实测发现）。
+     ok 在 v2.1 曾是墨色 #000000（中性"通过"），2026-10-06 按用户要求改回绿色：
+     状态栏的"模型运行中"压在 12% 自身 soft 上读起来像未激活。取 v2.0 的 #2E6B4F
+     （白 6.30 / sunken 5.53 / 自身 soft 5.78，三档全过）。 */
+  --suj-primary: #000000;     /* 主按钮黑块实底 */
+  --suj-accent: #D40000;      /* 红强调：焦点环/链接/术语高亮/选中行左缘条/流式光标 */
+  --suj-danger: #D40000;      /* 同 accent，语义区分靠位置不靠色相 */
+  --suj-warn: #0057B8;        /* 6.89:1 */
+  --suj-ok: #2E6B4F;          /* 6.30:1（白）/ 5.53:1（sunken） */
 
-  /* soft 底（badge 背景 / 选中行底）：light 8% */
-  --suj-accent-soft: color-mix(in srgb, var(--suj-accent) 8%, transparent);
-  --suj-danger-soft: color-mix(in srgb, var(--suj-danger) 8%, transparent);
-  --suj-warn-soft: color-mix(in srgb, var(--suj-warn) 8%, transparent);
-  --suj-ok-soft: color-mix(in srgb, var(--suj-ok) 8%, transparent);
+  /* soft 底（badge 背景 / 选中行底）：light 6%。注意 6% 只是"够淡"，
+     红字能否过 AA 由 --suj-accent 的值决定，不是由这个百分比决定（见上）。 */
+  --suj-accent-soft: color-mix(in srgb, var(--suj-accent) 6%, transparent);
+  --suj-danger-soft: color-mix(in srgb, var(--suj-danger) 6%, transparent);
+  --suj-warn-soft: color-mix(in srgb, var(--suj-warn) 6%, transparent);
+  --suj-ok-soft: color-mix(in srgb, var(--suj-ok) 6%, transparent);
 
-  /* §2.4 文本选区色（Fix round 1 补规格）：--suj-accent-soft 只有 8%，当选区高亮
-     几乎看不见，故用 24% accent 派生。引用 var(--suj-accent)，深色主题下自动跟随
-     深色 accent（#8AA6E8 的 24%），无需在 dark 块另写一份。base.css 的 ::selection 消费它。 */
+  /* 文本选区色：24% accent 派生（base.css 的 ::selection 消费它）。 */
   --suj-selection: color-mix(in srgb, var(--suj-accent) 24%, transparent);
 
-  /* §4.4 层级：--suj-e-0 是面板默认（禁止给面板加阴影）
-     --suj-e-1 供 §5.3 Segmented 选中态（比 e-2 更低的一层微升），Fix round 1 补齐。 */
+  /* §4.4 层级：Swiss 禁装饰阴影。e-1 = none；e-2/e-3 = 1px 黑描边环
+     （结构线，非装饰阴影——浮层在纯白画布上的瑞士式分层手段）。 */
   --suj-e-0: none;
-  --suj-e-1: 0 1px 2px rgba(24, 24, 22, .06);
-  --suj-e-2: 0 1px 2px rgba(24, 24, 22, .06), 0 8px 24px rgba(24, 24, 22, .10);
-  --suj-e-3: 0 2px 4px rgba(24, 24, 22, .08), 0 16px 48px rgba(24, 24, 22, .14);
+  --suj-e-1: none;
+  --suj-e-2: 0 0 0 1px var(--suj-line-strong);
+  --suj-e-3: 0 0 0 1px var(--suj-line-strong);
 
   /* §5.9 Scrim */
-  --suj-scrim: rgba(24, 24, 22, .32);
+  --suj-scrim: rgba(0, 0, 0, .40);
 }
 
-/* ── 2. dark：同一套语义 token 换值，不是第二套设计 · DESIGN.md §2 dark 列 ──
+/* ── 2. dark：同一套语义 token 换值，不是第二套设计 · 瑞士反色 ──
    选择器特异性与 :root 相同（均为 0,1,0），靠**源码顺序在后**取胜，
    因此本块必须位于 light 块之后，禁止上移。 */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --suj-canvas: #131312;
-  --suj-surface: #1A1A19;
-  --suj-sunken: #101010;
-  --suj-raised: #20201F;
+  --suj-canvas: #000000;
+  --suj-surface: #0D0D0D;
+  --suj-sunken: #1A1A1A;
+  --suj-raised: #111111;
 
-  --suj-line: rgba(255, 255, 255, .10);
-  --suj-line-strong: rgba(255, 255, 255, .20);
+  --suj-line: rgba(255, 255, 255, .24);
+  --suj-line-strong: #FFFFFF;
 
-  /* 对 --suj-surface 对比度 14.7 / 7.3 / 4.8，三级全部过 AA */
-  --suj-ink-1: #ECECEA;
-  --suj-ink-2: #A8A8A2;
-  --suj-ink-3: #87877F;
-  --suj-ink-inverse: #131312;
+  /* 对 --suj-surface：ink-2 12.1 / ink-3 6.4，三级全部过 AA */
+  --suj-ink-1: #FFFFFF;
+  --suj-ink-2: #CCCCCC;
+  --suj-ink-3: #949494;
+  --suj-ink-inverse: #000000;
 
-  --suj-primary: #ECECEA;
-  --suj-accent: #8AA6E8;      /* 7.2:1 */
-  --suj-danger: #E4796E;      /* 6.0:1 */
-  --suj-warn: #D9A441;        /* 7.7:1 */
-  --suj-ok: #6FBF97;          /* 7.9:1 */
+  --suj-primary: #FFFFFF;
+  --suj-accent: #FF1A1A;      /* 纯红在深底 4.87 / sunk 4.35 —— 提亮一档保 sunk 上过 AA */
+  --suj-danger: #FF1A1A;      /* 4.87:1 */
+  --suj-warn: #6FA8E8;        /* 7.8:1（#0057B8 在深底不足 AA，同旧例提亮） */
+  --suj-ok: #5FBF8F;          /* 同色相提亮 L 30→56：深底 8.64 / sunk 7.74 / 自身 soft 7.28 */
 
-  /* soft 底：dark 14%（深底上 8% 不足以成形） */
-  --suj-accent-soft: color-mix(in srgb, var(--suj-accent) 14%, transparent);
-  --suj-danger-soft: color-mix(in srgb, var(--suj-danger) 14%, transparent);
-  --suj-warn-soft: color-mix(in srgb, var(--suj-warn) 14%, transparent);
-  --suj-ok-soft: color-mix(in srgb, var(--suj-ok) 14%, transparent);
+  /* soft 底：dark 12%（深底上 6% 不足以成形） */
+  --suj-accent-soft: color-mix(in srgb, var(--suj-accent) 12%, transparent);
+  --suj-danger-soft: color-mix(in srgb, var(--suj-danger) 12%, transparent);
+  --suj-warn-soft: color-mix(in srgb, var(--suj-warn) 12%, transparent);
+  --suj-ok-soft: color-mix(in srgb, var(--suj-ok) 12%, transparent);
 
   /* --suj-selection 引用 var(--suj-accent)，深色下自动是深色 accent 的 24%，无需在此重申。 */
 
-  /* §4.4：深色下阴影几乎不可见 → 浮层靠 1px --suj-line-strong 描边分层，
-     用 box-shadow 环表达（组件因此不必在深色下额外写 border，布局不跳）。
-     e-1/e-2/e-3 深色值统一为 0 0 0 1px var(--suj-line-strong)（DESIGN.md §4.4 已记字面值）。 */
-  --suj-e-1: 0 0 0 1px var(--suj-line-strong);
+  /* 深色浮层沿用 1px 描边环分层（环即瑞士的结松线，非装饰阴影）。 */
+  --suj-e-1: 0 0 0 1px var(--suj-line);
   --suj-e-2: 0 0 0 1px var(--suj-line-strong);
   --suj-e-3: 0 0 0 1px var(--suj-line-strong);
 
-  --suj-scrim: rgba(0, 0, 0, .55);
+  --suj-scrim: rgba(0, 0, 0, .60);
 }
 
 /* ── 3. 主题无关原始 token · DESIGN.md §4.1 / §3.5 / §4.3 / §4.4 / §3.3 ────
@@ -171,8 +183,11 @@
   --suj-h-control-lg: 36px;   /* 主 CTA（引导、空态） */
   --suj-h-row: 32px;          /* 操作态表格行 */
   --suj-h-row-lg: 40px;       /* 舒适态表格行（历史列表） */
-  --suj-h-rail: 56px;         /* 左导航宽 */
-  --suj-h-status: 32px;       /* 状态栏 */
+  --suj-h-rail: 64px;         /* 左导航宽（2026-10-06 按实现订正：原 56，实际 w-16=64） */
+  --suj-h-status: 40px;       /* 状态栏（同上订正：原 32，实际 h-10=40） */
+  /* 内容列水平内缩：main 的 px 与状态栏首项的左内缩共用此值，
+     状态栏左内缩 = rail + pad-shell-x，使首个 chip 与页面内容左缘对齐。 */
+  --suj-pad-shell-x: 28px;
 
   /* §3.5 行文限宽：阅读区文本块 max-width，在栏内居中。
      大面积留白靠限制行文宽度产生，不靠加 padding。
@@ -207,17 +222,26 @@
    唯一例外：三级可缩放正文字号引用 --suj-text-*（见第 3 段说明），
    以便 applyFontSize() 的内联覆盖能穿透到 utility。 */
 @theme {
-  /* §4.2 圆角（4 步，禁止任意值） */
-  --radius-xs: 3px;      /* tooltip */
-  --radius-sm: 6px;      /* 按钮、输入、seg item、表格单元控件 */
-  --radius-md: 10px;     /* 面板、popover、drawer 内块、rail item */
-  --radius-lg: 14px;     /* modal、drawer、toast */
-  --radius-full: 999px;  /* 仅状态点、badge、switch */
+  /* §4.2 圆角：Swiss 直角网格 —— 全部 0，禁止任意圆角值。
+     --radius-full 仅保留给状态点/badge 圆点/switch 这类"圆点字形"，
+     不再用于任何盒子（按钮/输入/面板全部直角）。 */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 999px;
+
+  /* §6.2 断点：Tailwind v4 的断点即 @theme 变量，产出 wide: 变体。
+     窗口最小 1180 → 只需两档：<1380 两列、≥1380 三列（模型卡栅格）。 */
+  --breakpoint-wide: 1380px;
 
   /* §3.2 字体栈（单一栈，CJK 在通用族之前——见文件头"字体栈纪律"）
-     --font-app / --font-mono 是 font-app / font-mono utility 的 @theme 键，**不改名**
-     （改名会连带改 utility 名）。--font-mono 与旧文件同名，靠第 6 段的非分层重申取胜。 */
-  --font-app: 'Inter', 'Microsoft YaHei UI', 'Source Han Sans CN', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+     Swiss：Archivo（内嵌，拉丁）+ Noto Sans SC 子集（内嵌，中文），系统 Helvetica/Arial/雅黑 兜底；
+     Inter 已弃用并移出仓库。两份内嵌字体的 @font-face 见 theme/base.css。
+     --font-app / --font-mono 是 font-app / font-mono utility 的 @theme 键，**不改名**。
+     --font-mono 与旧文件同名，靠第 6 段的非分层重申取胜；
+   保留 JetBrains Mono 仅用于 .num 数字/时间码（功能性数据排版，非风格性衬线滥用）。 */
+  --font-app: 'Archivo', 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', 'Microsoft YaHei UI', 'Source Han Sans CN', 'PingFang SC', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
 
   /* §3.3 字阶（字重只用 400/500/600；Windows ClearType 下小字号 700 发糊） */

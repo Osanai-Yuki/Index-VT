@@ -1,220 +1,361 @@
-// 模型中心（01 文档 §6.4 / mockups 屏 4）：三模型卡片七态、下载/取消/导入/删除、
-// 双源择优徽标、VRAM 仪表、空闲释放倒计时、保持加载。
+// 模型中心（01 文档 §6.4）· Track C 迁移版（2026-10-06）
+// 新设计系统组合（Badge/Button/Modal/Progress/Segmented）+ 瑞士 token +
+// 未知模型归位（apiListUnknownModels/apiAssignUnknown 接线）+
+// alert/confirm 全部下线（toast + 破坏性确认 Modal，初始焦点在取消）+
+// 激活条件：模型文件已登记即可启用（此前写死只允许 translate，下载完的模型选不了）；
+// 对暂无专属消费界面的模型如实标注后果，不禁止选择。
 import { useCallback, useEffect, useState } from 'react'
-import { FolderOpen, Trash2, Pause, X } from 'lucide-react'
-import { Chip, Btn, Seg, Progress } from '../components/ui'
+import { AlertTriangle, Check, FolderOpen, Pause, Trash2, X } from 'lucide-react'
+import { Badge, Button, Modal, Progress, Segmented } from '../components/ui/index'
+import { toast } from '../stores/toastStore'
 import { useAppStore } from '../stores/appStore'
+import { on, EV } from '../lib/wails'
 import {
   apiListModels,
+  apiListUnknownModels,
+  apiAssignUnknown,
   apiDownloadModel,
   apiCancelDownload,
   apiDeleteModel,
   apiSetActiveModel,
   apiKeepAlive,
   apiOpenModelsFolder,
-  eventsOn,
 } from '../wailsapi'
 
-const STATE_META: Record<string, { text: string; tone: 'on' | 'amber' | 'warn' | 'blue' | 'danger' | 'default' }> = {
-  'not-downloaded': { text: '未下载', tone: 'default' },
+type Quant = 'Q4_K_M' | 'Q8_0'
+type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn' | 'danger'
+
+/** 后端 modelmanager.DownloadProgress 的前端形状（事件 model:progress 与 ListModels.download 共用） */
+interface DlProgress {
+  modelId?: string
+  quant?: string
+  phase?: 'probing' | 'downloading' | 'verifying' | 'done' | 'failed' | 'canceled'
+  bytesDone?: number
+  bytesTotal?: number
+  speedBPS?: number
+  source?: string
+  message?: string
+}
+
+const STATE_META: Record<string, { text: string; tone: BadgeTone }> = {
+  'not-downloaded': { text: '未下载', tone: 'neutral' },
   downloading: { text: '下载中', tone: 'warn' },
-  ready: { text: '就绪', tone: 'blue' },
-  loading: { text: '加载中', tone: 'amber' },
-  running: { text: '运行中', tone: 'on' },
-  sleeping: { text: '休眠', tone: 'default' },
+  ready: { text: '就绪', tone: 'accent' },
+  loading: { text: '加载中', tone: 'warn' },
+  running: { text: '运行中', tone: 'ok' },
+  sleeping: { text: '休眠', tone: 'neutral' },
   crashed: { text: '崩溃', tone: 'danger' },
 }
+
+const MODEL_NAMES: Record<string, string> = {
+  translate: 'Index-Translate-2B（主翻译）',
+  nailong: 'Index-Nailong-2B（长文档 · M5）',
+  homura: 'Index-Homura-2B（配音 · 无界面入口）',
+}
+
+const errToast = (e: unknown) =>
+  toast.push({ tone: 'error', message: String((e as { message?: string })?.message ?? e) })
 
 export function ModelHub() {
   const status = useAppStore((s) => s.status)
   const refreshStatus = useAppStore((s) => s.refreshStatus)
   const [models, setModels] = useState<any[]>([])
-  const [quantSel, setQuantSel] = useState<Record<string, string>>({})
+  /* 后端 ListUnknownModels 返回的是 []ModelInfo（含 path 字段），不是字符串数组 ——
+     这里在边界上取 path，页面其余部分只认字符串键。 */
+  const [unknowns, setUnknowns] = useState<string[]>([])
+  const [quantSel, setQuantSel] = useState<Record<string, Quant>>({})
+  // 未知文件归位：每行的 (model, quant) 选择
+  const [assignSel, setAssignSel] = useState<Record<string, { id: string; quant: Quant }>>({})
   const [probeMsg, setProbeMsg] = useState<string | null>(null)
+  // 下载进度的实时缓存（按模型 id）。事件驱动 → 卡片立刻有反馈；
+  // 终态清掉，避免下载完成后残留一条 100% 的死进度条。
+  const [live, setLive] = useState<Record<string, DlProgress>>({})
+  // 破坏性删除确认（Modal，初始焦点在取消）
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; quant: Quant; name: string } | null>(null)
 
   const refresh = useCallback(async () => {
     try {
       setModels((await apiListModels()) ?? [])
+      const unknownInfo = (await apiListUnknownModels()) ?? []
+      setUnknowns(unknownInfo.map((m: { path?: string }) => m?.path ?? '').filter(Boolean))
     } catch {
       /* runtime */
     }
   }, [])
 
+  const dropLive = useCallback((id: string) => {
+    setLive((s) => {
+      if (!(id in s)) return s
+      const next = { ...s }
+      delete next[id]
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     refresh()
-    const off = eventsOn('model:progress', (p: any) => {
-      if (p?.phase === 'probing') setProbeMsg(p.message)
-      if (p?.phase === 'downloading') setProbeMsg(null)
-      refresh()
+    const off = on(EV.MODEL_PROGRESS, (e) => {
+      const p = (e ?? {}) as DlProgress
+      const id = p.modelId
+      if (!id) return
+      switch (p.phase) {
+        case 'probing':
+          setProbeMsg(p.message ?? '探测 HF / ModelScope 双源…')
+          break
+        case 'downloading':
+          setProbeMsg(null)
+          setLive((s) => ({ ...s, [id]: p }))
+          break
+        case 'verifying':
+          // 1.3GB 的 SHA256 要几秒，是真死时间：把最后一段显示成"校验中"而不是停在 99%
+          setLive((s) => ({ ...s, [id]: { ...p, bytesDone: p.bytesTotal } }))
+          break
+        case 'done':
+          dropLive(id)
+          setProbeMsg(null)
+          refresh()
+          refreshStatus()
+          toast.push({ tone: 'ok', message: `${MODEL_NAMES[id] ?? id} 下载完成 · SHA256 校验通过` })
+          break
+        case 'canceled':
+          dropLive(id)
+          refresh()
+          toast.push({ tone: 'warn', message: '已取消下载 · 断点保留，可续传' })
+          break
+        case 'failed':
+          dropLive(id)
+          refresh()
+          toast.push({ tone: 'error', message: `下载失败：${p.message ?? '未知原因'}` })
+          break
+      }
     })
-    const off2 = eventsOn('models:updated', refresh)
+    const off2 = on(EV.MODELS_UPDATED, refresh)
     return () => {
       off()
       off2()
     }
-  }, [refresh])
+  }, [refresh, refreshStatus, dropLive])
 
   const gpuTotal = status?.gpu?.totalMB ?? 0
   const gpuUsed = status?.gpu?.usedMB ?? 0
 
+  const doAssign = (path: string) => {
+    const sel = assignSel[path] ?? { id: 'translate', quant: 'Q4_K_M' as Quant }
+    apiAssignUnknown(path, sel.id, sel.quant)
+      .then(() => {
+        toast.push({ tone: 'ok', message: '已归位并重新登记' })
+        refresh()
+      })
+      .catch(errToast)
+  }
+
   return (
     <div className="flex flex-col gap-4 h-full overflow-auto screen-in">
-      {/* 顶部：VRAM 仪表 */}
-      <div className="bg-bg-1 border border-hairline rounded-[14px] flex items-center gap-4 px-5 py-4">
-        <span className="label">
-          模型中心 · <b>MODEL HUB</b>
+      {/* 顶部：VRAM 仪表（窄窗加固：flex-wrap 整块换行，VRAM 条可收缩，按钮不折字） */}
+      <div className="bg-surface border border-line flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
+        <span className="text-micro uppercase tracking-caps text-ink3">
+          模型中心 · <b className="text-ink2 font-medium">MODEL HUB</b>
         </span>
-        <span className="w-px h-5 bg-hairline-2" />
+        <span className="w-px h-5 bg-lineStrong" />
         {gpuTotal > 0 ? (
-          <div className="flex items-center gap-3">
-            <span className="label">VRAM</span>
-            <div className="w-[200px]">
-              <Progress pct={(gpuUsed / gpuTotal) * 100} teal />
-            </div>
-            <Chip>
-              {(gpuUsed / 1024).toFixed(1)} / {(gpuTotal / 1024).toFixed(1)} GB
-            </Chip>
+          <div className="flex min-w-0 flex-1 basis-64 max-w-80 items-center gap-3">
+            <span className="text-micro uppercase tracking-caps text-ink3">VRAM</span>
+            <Progress pct={(gpuUsed / gpuTotal) * 100} tone="ok" label="显存占用" />
+            <Badge>
+              <span className="num">{(gpuUsed / 1024).toFixed(1)} / {(gpuTotal / 1024).toFixed(1)} GB</span>
+            </Badge>
           </div>
         ) : (
-          <Chip tone="warn" dot>
+          <Badge tone="warn" dot>
             未检测到 NVIDIA GPU · CPU 推理模式
-          </Chip>
+          </Badge>
         )}
         {status?.gpu?.present && (
-          <Chip tone="on" dot>
+          <Badge tone="ok" dot className="max-w-72 truncate" title={status.gpu.name}>
             GPU: {status.gpu.name}
-          </Chip>
+          </Badge>
         )}
-        <Chip tone="blue" dot>
-          存储: .\models\（项目文件夹）
-        </Chip>
-        <div className="ml-auto flex gap-2">
-          <Btn onClick={() => apiOpenModelsFolder().catch(() => {})}>
+        <Badge tone="neutral" dot title="存储位置：models/（随 exe 所在目录，便携布局）">
+          存储：models/
+        </Badge>
+        <div className="ml-auto flex shrink-0 gap-2">
+          <Button className="whitespace-nowrap" onClick={() => apiOpenModelsFolder().catch(errToast)}>
             <FolderOpen size={14} /> 打开模型文件夹
-          </Btn>
+          </Button>
         </div>
       </div>
 
       {/* 三模型卡片 */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+      <div className="grid grid-cols-2 wide:grid-cols-3 gap-4">
         {models.map((m, i) => {
-          const st = STATE_META[m.state] ?? { text: m.state, tone: 'default' as const }
+          const st = STATE_META[m.state] ?? { text: m.state, tone: 'neutral' as BadgeTone }
           const quant = quantSel[m.id] ?? 'Q4_K_M'
-          const dl = m.download
+          // 事件实时值优先；回落到 ListModels 的快照，这样切页回来也看得到进度
+          const dl: DlProgress | undefined = live[m.id] ?? m.download
           const curQuant = m.quants?.find((q: any) => q.quant === quant)
           const present = curQuant?.present
+          const downloading = m.state === 'downloading'
+          const verifying = downloading && dl?.phase === 'verifying'
+          const pct = dl?.bytesTotal ? Math.min(100, ((dl.bytesDone ?? 0) / dl.bytesTotal) * 100) : 0
+          // 激活条件：文件已登记进 store 即可。不再要求 sha256 非空——导入件与
+          // 未校验档位可能没有哈希，写死会让本来能用的模型选不了；校验状态卡片上已如实显示。
+          const activatable = !!present
+          const noConsumer = m.id !== 'translate'
           return (
             <div
               key={m.id}
-              className="bg-bg-1 border border-hairline rounded-[14px] flex flex-col overflow-hidden screen-in"
+              className="bg-surface border border-line flex flex-col overflow-hidden screen-in"
               style={{ animationDelay: `${i * 100}ms` }}
             >
-              <div className="px-4.5 pt-4 px-4 flex items-start gap-3">
+              <div className="px-4 pt-4 flex items-start gap-3">
                 <div
-                  className={`w-[42px] h-[42px] rounded-[11px] grid place-items-center font-mono font-semibold text-[13px] ${
+                  className={`w-10 h-10 grid place-items-center font-semibold text-body ${
                     m.id === 'translate'
-                      ? 'bg-accent-soft text-accent shadow-[0_0_0_1px_var(--accent-line)]'
+                      ? 'bg-accentSoft text-accent'
                       : m.id === 'nailong'
-                        ? 'bg-info-soft text-info'
-                        : 'bg-teal-soft text-teal'
+                        ? 'bg-warnSoft text-warn'
+                        : 'bg-okSoft text-ok'
                   }`}
                 >
                   {m.id === 'translate' ? 'T' : m.id === 'nailong' ? 'N' : 'H'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[15px] font-bold">{m.name}</div>
-                  <div className="text-[11.5px] text-ink-3 mt-0.5">{m.role} · {m.languages}</div>
+                  <div className="text-title font-bold">{m.name}</div>
+                  <div className="text-micro text-ink3 mt-0.5">{m.role} · {m.languages}</div>
                 </div>
-                <Chip tone={st.tone} dot>
-                  {m.state === 'downloading' && dl ? `${st.text} ${Math.round((dl.bytesDone / Math.max(1, dl.bytesTotal)) * 100)}%` : st.text}
-                </Chip>
+                <Badge tone={st.tone} dot>
+                  {downloading && dl ? (verifying ? '校验中' : `${st.text} ${Math.round(pct)}%`) : st.text}
+                </Badge>
               </div>
               <div className="px-4 pt-3 flex gap-2 flex-wrap">
-                <Chip>
-                  {quant} · {curQuant?.present ? `${(curQuant.sizeBytes / (1 << 30)).toFixed(2)}GB` : `≈${(quant === 'Q4_K_M' ? 1.31 : 2.08).toFixed(2)}GB`}
-                </Chip>
-                {m.port ? <Chip>: {m.port}</Chip> : null}
+                <Badge>
+                  <span className="num">
+                    {quant} · {curQuant?.present ? `${(curQuant.sizeBytes / (1 << 30)).toFixed(2)}GB` : `≈${(quant === 'Q4_K_M' ? 1.31 : 2.08).toFixed(2)}GB`}
+                  </span>
+                </Badge>
+                {m.port ? <Badge><span className="num">: {m.port}</span></Badge> : null}
                 {m.source ? (
-                  <Chip tone="on" dot>
+                  <Badge tone="ok" dot>
                     {m.source === 'hf' ? 'HF 源' : m.source === 'modelscope' ? 'ModelScope' : m.source}
-                  </Chip>
+                  </Badge>
                 ) : null}
               </div>
               <div className="px-4 py-3 flex flex-col gap-3 flex-1">
-                {m.state === 'downloading' && dl ? (
+                {downloading && dl ? (
                   <div className="flex flex-col gap-2">
-                    <Progress pct={(dl.bytesDone / Math.max(1, dl.bytesTotal)) * 100} />
-                    <div className="flex justify-between font-mono text-[10px] text-ink-3 tracking-wide">
-                      <span>
-                        {(dl.bytesDone / (1 << 20)).toFixed(0)} / {(dl.bytesTotal / (1 << 20)).toFixed(0)} MB
-                        {dl.speedBPS > 0 ? ` · ${(dl.speedBPS / (1 << 20)).toFixed(1)} MB/s` : ''}
+                    <Progress pct={verifying ? 100 : pct} tone="warn" label={`${m.name} 下载进度`} />
+                    <div className="flex justify-between text-micro text-ink3 tracking-wide">
+                      <span className="num">
+                        {verifying
+                          ? 'SHA256 校验中…'
+                          : `${(dl.bytesDone ?? 0) / (1 << 20) | 0} / ${(dl.bytesTotal ?? 0) / (1 << 20) | 0} MB${
+                              dl.speedBPS ? ` · ${(dl.speedBPS / (1 << 20)).toFixed(1)} MB/s` : ''
+                            }`}
                       </span>
-                      <span>支持断点续传</span>
+                      <span>{dl.source ? `${dl.source === 'hf' ? 'HF' : 'ModelScope'} · ` : ''}{verifying ? '校验后自动登记' : '支持断点续传'}</span>
                     </div>
                   </div>
                 ) : null}
-                <div className="flex justify-between text-xs text-ink-3 items-center">
+                <div className="flex justify-between text-caption text-ink3 items-center">
                   <span>量化档位</span>
-                  <Seg
-                    options={['Q4_K_M', 'Q8_0']}
+                  <Segmented<'Q4_K_M' | 'Q8_0'>
+                    options={['Q4_K_M', 'Q8_0'] as const}
                     value={quant}
-                    accentSel
+                    size="sm"
+                    aria-label={`${m.name} 量化档位`}
                     onChange={(v) => setQuantSel((s) => ({ ...s, [m.id]: v }))}
                   />
                 </div>
                 {present ? (
                   <>
-                    <div className="flex justify-between text-xs text-ink-3">
+                    <div className="flex justify-between text-caption text-ink3">
                       <span>SHA256</span>
-                      <b className="text-ink-2 font-mono font-medium">
-                        {curQuant.sha256 ? '✓ 校验通过' : '未校验'}
+                      <b className="text-ink2 font-medium inline-flex items-center gap-1">
+                        {curQuant.sha256 ? (
+                          <>
+                            <Check size={11} strokeWidth={2.5} aria-hidden="true" /> 校验通过
+                          </>
+                        ) : (
+                          '未校验'
+                        )}
                       </b>
                     </div>
-                    <div className="flex justify-between text-xs text-ink-3">
+                    <div className="flex justify-between text-caption text-ink3">
                       <span>路径</span>
-                      <b className="text-ink-2 font-mono font-medium text-[11px] truncate max-w-[220px]">
-                        {curQuant.path}
-                      </b>
+                      <b className="text-ink2 font-medium text-micro truncate max-w-56">{curQuant.path}</b>
                     </div>
                   </>
                 ) : null}
                 <div className="mt-auto flex gap-2 pt-1">
                   {m.state === 'downloading' ? (
                     <>
-                      <Btn onClick={() => apiCancelDownload(m.id).catch(() => {})}>
+                      <Button onClick={() => apiCancelDownload(m.id).catch(errToast)}>
                         <Pause size={14} /> 暂停
-                      </Btn>
-                      <Btn kind="danger" onClick={() => apiCancelDownload(m.id).catch(() => {})}>
+                      </Button>
+                      <Button kind="danger" onClick={() => apiCancelDownload(m.id).catch(errToast)}>
                         <X size={14} /> 取消
-                      </Btn>
+                      </Button>
                     </>
                   ) : present ? (
                     <>
-                      <Btn
+                      <Button
                         kind={m.active ? 'primary' : 'secondary'}
-                        onClick={() => apiSetActiveModel(m.id).then(refreshStatus).catch((e) => alert(e))}
+                        disabled={!activatable && !m.active}
+                        title={
+                          activatable
+                            ? noConsumer
+                              ? '主翻译台目前用通用提示词驱动该模型（Nailong 官方模板链路待 M5）'
+                              : undefined
+                            : '模型文件尚未下载，无法设为当前'
+                        }
+                        onClick={() =>
+                          apiSetActiveModel(m.id)
+                            .then(refreshStatus)
+                            .catch(errToast)
+                        }
                       >
                         {m.active ? '当前模型' : '设为当前'}
-                      </Btn>
-                      <Btn kind="danger" onClick={() => {
-                        if (confirm(`删除 ${m.name} ${quant}？此操作不可恢复。`)) {
-                          apiDeleteModel(m.id, quant).then(refresh).catch((e) => alert(e))
-                        }
-                      }}>
+                      </Button>
+                      <Button kind="danger" onClick={() => setPendingDelete({ id: m.id, quant, name: m.name })}>
                         <Trash2 size={14} /> 删除
-                      </Btn>
+                      </Button>
                     </>
                   ) : (
-                    <Btn kind="primary" onClick={() => apiDownloadModel(m.id, quant).then(refresh).catch((e) => alert(e))}>
+                    <Button
+                      kind="primary"
+                      arrow
+                      onClick={() =>
+                        apiDownloadModel(m.id, quant)
+                          .then(() => {
+                            // DownloadModel 是异步的（Go 侧起 goroutine 立即返回），
+                            // 这里必须给反馈，否则点了就是"什么都没发生"
+                            toast.push({ tone: 'info', message: `开始下载 ${m.name} ${quant}（先探测双源）` })
+                            refresh()
+                          })
+                          .catch(errToast)
+                      }
+                    >
                       下载 {quant}
-                    </Btn>
+                    </Button>
                   )}
                 </div>
               </div>
+              {/* 已激活但没有专属消费界面的模型：如实说明后果，而不是不让选 */}
+              {m.active && noConsumer && (
+                <div className="border-t border-line bg-warnSoft px-4 py-2 flex items-center gap-2 text-micro text-warn">
+                  <AlertTriangle size={12} aria-hidden="true" />
+                  主翻译台将用通用提示词驱动此模型（{quant}）
+                </div>
+              )}
               {m.state === 'running' && (
-                <div className="border-t border-hairline bg-accent-soft px-4 py-2 flex items-center gap-2 text-[11.5px] text-accent">
-                  <span className="font-mono">●</span> 空闲 {Math.max(0, (status?.idleMinutes ?? 5) * 60 - (status?.idleSeconds ?? 0))}s 后自动释放
-                  <button className="ml-auto btn-ghost text-accent cursor-pointer bg-transparent border-0" onClick={() => apiKeepAlive().catch(() => {})}>
+                <div className="border-t border-line bg-accentSoft px-4 py-2 flex items-center gap-2 text-micro text-accent">
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" aria-hidden="true" />
+                  空闲 <span className="num">{Math.max(0, (status?.idleMinutes ?? 5) * 60 - (status?.idleSeconds ?? 0))}s</span> 后自动释放
+                  <button
+                    type="button"
+                    className="ml-auto text-accent cursor-pointer bg-transparent border-0 text-micro"
+                    onClick={() => apiKeepAlive().catch(errToast)}
+                  >
                     保持加载
                   </button>
                 </div>
@@ -224,17 +365,91 @@ export function ModelHub() {
         })}
       </div>
 
+      {/* 未知文件归位（models/ 内无法自动识别的 .gguf） */}
+      {unknowns.length > 0 && (
+        <div className="bg-surface border border-line px-5 py-3.5 flex flex-col gap-2.5">
+          <span className="text-micro uppercase tracking-caps text-ink3">
+            未知文件 · <b className="text-ink2 font-medium">UNASSIGNED</b>
+          </span>
+          {unknowns.map((path) => {
+            const sel = assignSel[path] ?? { id: 'translate', quant: 'Q4_K_M' as Quant }
+            const name = path.split('\\').pop() ?? path
+            return (
+              <div key={path} className="flex items-center gap-3 text-caption text-ink2">
+                <span className="truncate flex-1" title={path}>{name}</span>
+                <select
+                  aria-label={`${name} 归位模型`}
+                  value={sel.id}
+                  onChange={(e) => setAssignSel((s) => ({ ...s, [path]: { ...sel, id: e.target.value } }))}
+                  className="h-(--suj-h-control-sm) bg-sunken border border-line px-2 text-caption text-ink1"
+                >
+                  <option value="translate">translate</option>
+                  <option value="nailong">nailong</option>
+                  <option value="homura">homura</option>
+                </select>
+                <Segmented<'Q4_K_M' | 'Q8_0'>
+                  size="sm"
+                  options={['Q4_K_M', 'Q8_0'] as const}
+                  value={sel.quant}
+                  aria-label={`${name} 量化档位`}
+                  onChange={(v) => setAssignSel((s) => ({ ...s, [path]: { ...sel, quant: v } }))}
+                />
+                <Button size="sm" onClick={() => doAssign(path)}>
+                  归位
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* 下载源面板 */}
-      <div className="bg-bg-1 border border-hairline rounded-[14px] px-5 py-3.5 flex gap-3 items-center">
-        <span className="label">
-          下载源 · <b>SOURCE</b>
+      <div className="bg-surface border border-line px-5 py-3.5 flex gap-3 items-center">
+        <span className="text-micro uppercase tracking-caps text-ink3">
+          下载源 · <b className="text-ink2 font-medium">SOURCE</b>
         </span>
-        <Chip tone="on" dot>
+        <Badge tone="ok" dot>
           双源探测：HF / ModelScope 择优
-        </Chip>
-        <Chip>续传仅限同源 · 切源将重新下载</Chip>
-        {probeMsg && <Chip tone="amber" dot>{probeMsg}</Chip>}
+        </Badge>
+        <Badge>续传仅限同源 · 切源将重新下载</Badge>
+        {probeMsg && <Badge tone="warn" dot>{probeMsg}</Badge>}
       </div>
+
+      {/* 删除确认（破坏性：初始焦点在取消，防回车误删） */}
+      <Modal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        title="删除模型文件"
+        initialFocus="cancel"
+        footer={
+          <>
+            <Button data-modal-initial="cancel" onClick={() => setPendingDelete(null)}>
+              取消
+            </Button>
+            <Button
+              kind="danger"
+              data-modal-initial="confirm"
+              onClick={() => {
+                if (!pendingDelete) return
+                apiDeleteModel(pendingDelete.id, pendingDelete.quant)
+                  .then(() => {
+                    toast.push({ tone: 'ok', message: '已删除' })
+                    refresh()
+                  })
+                  .catch(errToast)
+                setPendingDelete(null)
+              }}
+            >
+              <Trash2 size={14} /> 删除
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body text-ink2">
+          将删除 <b className="text-ink1">{pendingDelete?.name}</b> 的{' '}
+          <span className="num">{pendingDelete?.quant}</span> 档位文件，此操作不可恢复。
+        </p>
+      </Modal>
     </div>
   )
 }

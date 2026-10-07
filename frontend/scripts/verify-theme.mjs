@@ -15,12 +15,11 @@
  * #1 锁双主题 token 换值，#4 锁 applyFontSize 只缩放三级正文字号、不动 --text-micro。
  * 另附两条 R29/字体落地检查（#6 #7），见文末说明。
  *
- * #8/#9/#10 是**新旧 token 层共存**的回归锁（Fix round 1，见报告「Fix round 1」）：
+ * #8/#9 是**新旧 token 层共存**的回归锁（Fix round 1，见报告「Fix round 1」）：
  *   新层原始变量一律加 `--suj-` 前缀，与旧 styles/tokens.css 的原始变量零重名。
- *   #8 锁旧变量未被新层覆盖（--ink-1 仍是 #E9EDF5、--accent 仍是 #E8A33D）
- *   #9 锁新变量独立解析（--suj-ink-1 light=#1A1A18 / dark=#ECECEA）
- *   #10 锁旧 utility `bg-bg-3 text-ink-1` 渲染对比度 ≥4.5:1——
- *      这条正是当初能抓出「默认主题下旧页面 1.11:1 不可读」缺陷的断言，禁止放宽。
+ *   #9 锁新变量独立解析（--suj-ink-1 light=#000000 / dark=#FFFFFF）。
+ *   （2026-10-06 Track C 收尾：旧层已随页面迁移删除，原 #8「旧值未覆盖」与
+ *    #10「旧 utility 对比度」两条并存期断言随之退役；#9 保留为语义变量换值锁。）
  *
  * 断言失败即 exit 1。**不得为了让它变绿而放宽断言**——修 CSS。
  */
@@ -180,12 +179,13 @@ async function runBrowserAssertions(page) {
 
   await page.goto(DEV_URL, { waitUntil: 'domcontentloaded' })
   await page.waitForLoadState('networkidle').catch(() => {})
-  /* 字体是 font-display: swap，等它们真正落地再测，避免拿到回退字体的度量 */
+  /* 字体是 font-display: swap，等它们真正落地再测，避免拿到回退字体的度量。
+     v2.1 起内嵌三份：Archivo（拉丁）+ Noto Sans SC 子集（中文）+ JetBrains Mono（等宽）。 */
   await page.evaluate(async () => {
     await Promise.all([
-      document.fonts.load('400 16px Inter'),
-      document.fonts.load('600 16px Inter'),
       document.fonts.load('400 16px "JetBrains Mono"'),
+      document.fonts.load('600 16px Archivo'),
+      document.fonts.load('400 16px "Noto Sans SC"'),
     ])
     await document.fonts.ready
   })
@@ -217,15 +217,15 @@ async function runBrowserAssertions(page) {
     return out
   }, THEME_MODULE)
 
-  const lightOk = themeFlip.lightCanvas.toLowerCase() === '#fbfbfa'
-  const darkOk = themeFlip.darkCanvas.toLowerCase() === '#131312'
-  record(1, '--suj-canvas light=#FBFBFA / dark=#131312（同一套语义 token 换值）', lightOk && darkOk, [
+  const lightOk = themeFlip.lightCanvas.toLowerCase() === '#ffffff'
+  const darkOk = themeFlip.darkCanvas.toLowerCase() === '#000000'
+  record(1, '--suj-canvas light=#FFFFFF / dark=#000000（瑞士化重映射，同一套语义 token 换值）', lightOk && darkOk, [
     `light: data-theme="${themeFlip.lightAttr}" --suj-canvas=${themeFlip.lightCanvas} --suj-surface=${themeFlip.lightSurface} --suj-ink-1=${themeFlip.lightInk1} color-scheme=${themeFlip.lightColorScheme}`,
     `dark : data-theme="${themeFlip.darkAttr}" --suj-canvas=${themeFlip.darkCanvas} --suj-surface=${themeFlip.darkSurface} --suj-ink-1=${themeFlip.darkInk1} color-scheme=${themeFlip.darkColorScheme}`,
     `dark : --suj-e-2=${themeFlip.darkE2}`,
     `dark : --suj-accent-soft=${themeFlip.darkAccentSoft}`,
     `resolveTheme('system') → ${themeFlip.systemResolved}；storedTheme() → ${themeFlip.storedAfter}`,
-    `期望 light #FBFBFA、dark #131312`,
+    `期望 light #FFFFFF、dark #000000（2026-10-06 瑞士风格重映射）`,
   ].join('\n'))
 
   /* ── #2 CJK 栈必须排在通用族之前（旧 bug 回归锁）──────────── */
@@ -265,13 +265,13 @@ async function runBrowserAssertions(page) {
     }
     return { raw, validLength, computed, all }
   })
-  const radiusOk = radius.raw === '6px' && radius.validLength && radius.computed === '6px'
-  record(3, '--radius-sm 解析为 6px 且是有效长度（非空/非 guaranteed-invalid）', radiusOk, [
+  const radiusOk = radius.raw === '0px' && radius.validLength && radius.computed === '0px'
+  record(3, '--radius-sm 解析为 0px（瑞士直角网格）且是有效长度（非空/非 guaranteed-invalid）', radiusOk, [
     `--radius-sm = ${JSON.stringify(radius.raw)}`,
     `赋给 style.borderRadius 后仍非空（= 有效长度）？ ${radius.validLength}`,
     `.rounded-sm 元素 computed border-top-left-radius = ${radius.computed}`,
     `全套：xs=${radius.all.xs} sm=${radius.all.sm} md=${radius.all.md} lg=${radius.all.lg} full=${radius.all.full}`,
-    `（旧 @theme inline { --radius-s: var(--radius-s) } 同名自引用 → 成环 → guaranteed-invalid → 值为空）`,
+    `（2026-10-06 瑞士化：四档盒圆角全部 0px；--radius-full 仅供圆点字形）`,
   ].join('\n'))
 
   /* ── #4 applyFontSize('large')：正文 14.85px，--text-micro 不动 ── */
@@ -341,62 +341,64 @@ async function runBrowserAssertions(page) {
     monoOk ? '非分层重申生效：旧 :root 的 IBM Plex Mono 未胜出' : '旧 styles/tokens.css 的 :root 字面值胜出 → font-mono utility 未按 DESIGN.md §3.2 生效',
   ].join('\n'))
 
-  /* ── #7（附加）vendored woff2 真的被请求且可用 ─────────────── */
+  /* ── #7（附加）三份 vendored woff2 都被请求且可用 ─────────────── */
   const fontFaces = await page.evaluate(async () => {
     const faces = []
     document.fonts.forEach((f) => faces.push(`${f.family} ${f.weight} ${f.status}`))
     return {
       faces,
-      inter: document.fonts.check('600 16px Inter'),
       jbm: document.fonts.check('400 16px "JetBrains Mono"'),
+      archivo: document.fonts.check('600 16px Archivo'),
+      noto: document.fonts.check('400 16px "Noto Sans SC"'),
+      /* v2.1 已弃用 Inter：若仍注册即为回归（字体栈或 @font-face 被人加回来了） */
+      interRegistered: faces.some((f) => f.startsWith('Inter ')),
     }
   })
-  const interFile = fontResponses.find((r) => r.url.includes('inter-latin'))
   const jbmFile = fontResponses.find((r) => r.url.includes('jetbrains-mono-latin'))
+  const archivoFile = fontResponses.find((r) => r.url.includes('archivo-latin'))
+  const notoFile = fontResponses.find((r) => r.url.includes('noto-sans-sc-cjk'))
+  const interFile = fontResponses.find((r) => r.url.includes('inter-latin'))
   const external = fontResponses.filter((r) => r.external)
   const fontsOk = Boolean(
-    interFile && interFile.status === 200 &&
     jbmFile && jbmFile.status === 200 &&
-    fontFaces.inter && fontFaces.jbm &&
+    archivoFile && archivoFile.status === 200 &&
+    notoFile && notoFile.status === 200 &&
+    fontFaces.jbm && fontFaces.archivo && fontFaces.noto &&
+    !interFile && !fontFaces.interRegistered &&
     external.length === 0,
   )
-  const short = (r) => (r ? `${r.status} ${r.url.replace(/^https?:\/\/[^/]+/, '')}` : '未命中')
-  record(7, '[附加·离线字体] 本地 woff2 被请求（200）且 Inter/JetBrains Mono 可用', fontsOk, [
+  const short = (r) => (r ? `${r.status} ${r.url.replace(/^https?:\/\/[^/]+/, '')}` : '未请求')
+  record(7, '[附加·离线字体] 三份 woff2 均被请求（200）且可用；无 Inter、无站外请求', fontsOk, [
     `字体请求共 ${fontResponses.length} 条：${fontResponses.map(short).join(' | ') || '（无）'}`,
-    `inter-latin → ${short(interFile)}`,
     `jetbrains-mono-latin → ${short(jbmFile)}`,
-    `document.fonts.check('600 16px Inter') = ${fontFaces.inter}`,
-    `document.fonts.check('400 16px "JetBrains Mono"') = ${fontFaces.jbm}`,
+    `archivo-latin → ${short(archivoFile)}`,
+    `noto-sans-sc-cjk → ${short(notoFile)}`,
+    `inter-latin → ${interFile ? `仍被请求（${interFile.status}）——v2.1 应已移出仓库` : '未请求（符合预期）'}`,
+    `@font-face 里是否残留 Inter：${fontFaces.interRegistered ? '有（违规）' : '无'}`,
+    `check: jbm=${fontFaces.jbm} archivo=${fontFaces.archivo} noto=${fontFaces.noto}`,
     `已注册 @font-face：${fontFaces.faces.join(' | ') || '（无）'}`,
     `指向站外的字体请求：${external.length ? '有（违规）→ ' + external.map((r) => r.url).join(', ') : '无（符合离线约束）'}`,
   ].join('\n'))
 
-  /* ── #8（共存锁）旧原始变量未被新层覆盖 ─────────────────────────
-     新层原始变量一律加 --suj- 前缀（tokens.css），与旧 styles/tokens.css 的
-     原始变量零重名。因此 <html> 上的 --ink-1 / --accent 必须保持旧字面值。
-     改名前：新层 light 块也写 --ink-1/--accent（同名、非分层、源码在后）→
-     把旧值覆盖成素笺浅色墨色，这正是 Fix round 1 的阻塞缺陷根因。 */
-  const legacyVars = await page.evaluate(async (mod) => {
-    const m = await import(mod)
-    m.applyTheme('light')
+  /* ── #8（共存锁）旧原始变量已被 Track C 删除（styles/tokens.css 不复存在）──────
+     原断言「旧 --ink-1/--accent 保持旧字面值」随旧层退役；此处改为锁
+     旧变量名确实**不再定义**——防止任何人悄悄复活旧 token 层造成双权威。 */
+  const legacyGone = await page.evaluate(() => {
     const cs = getComputedStyle(document.documentElement)
     return {
       ink1: cs.getPropertyValue('--ink-1').trim(),
       accent: cs.getPropertyValue('--accent').trim(),
-      ink2: cs.getPropertyValue('--ink-2').trim(),
-      ink3: cs.getPropertyValue('--ink-3').trim(),
+      bg0: cs.getPropertyValue('--bg-0').trim(),
     }
-  }, THEME_MODULE)
-  const legacyOk =
-    legacyVars.ink1.toLowerCase() === '#e9edf5' &&
-    legacyVars.accent.toLowerCase() === '#e8a33d'
-  record(8, '[共存] 旧 --ink-1=#E9EDF5 / --accent=#E8A33D 未被新层覆盖', legacyOk, [
-    `getComputedStyle(html) --ink-1  = ${legacyVars.ink1}   （期望旧值 #E9EDF5）`,
-    `getComputedStyle(html) --accent = ${legacyVars.accent}   （期望旧值 #E8A33D）`,
-    `参考：--ink-2 = ${legacyVars.ink2}   --ink-3 = ${legacyVars.ink3}`,
+  })
+  const legacyOk = legacyGone.ink1 === '' && legacyGone.accent === '' && legacyGone.bg0 === ''
+  record(8, '[共存收尾] 旧 token 原始变量（--ink-1/--accent/--bg-0）已不复定义', legacyOk, [
+    `--ink-1  = ${JSON.stringify(legacyGone.ink1)}   （期望空：styles/tokens.css 已删除）`,
+    `--accent = ${JSON.stringify(legacyGone.accent)}   （期望空）`,
+    `--bg-0   = ${JSON.stringify(legacyGone.bg0)}   （期望空）`,
     legacyOk
-      ? '新旧零重名共存：新层走 --suj-ink-1 / --suj-accent，未触碰旧名'
-      : '新层原始变量与旧名冲突并覆盖 → 旧页面在浅色主题下拿到素笺墨色（缺陷根因）',
+      ? '旧层已彻底移除，theme/tokens.css 是唯一权威'
+      : '旧变量又出现了 → 有人复活了旧 token 层，新旧双权威会重现 1.11:1 缺陷',
   ].join('\n'))
 
   /* ── #9（共存锁）新层 --suj-ink-1 独立解析并随主题换值 ─────────────── */
@@ -411,26 +413,25 @@ async function runBrowserAssertions(page) {
     return { light, dark }
   }, THEME_MODULE)
   const sujOk =
-    sujVars.light.toLowerCase() === '#1a1a18' &&
-    sujVars.dark.toLowerCase() === '#ececea'
-  record(9, '[共存] 新层 --suj-ink-1 light=#1A1A18 / dark=#ECECEA（独立解析）', sujOk, [
-    `light: --suj-ink-1 = ${sujVars.light}   （期望 #1A1A18）`,
-    `dark : --suj-ink-1 = ${sujVars.dark}   （期望 #ECECEA）`,
+    sujVars.light.toLowerCase() === '#000000' &&
+    sujVars.dark.toLowerCase() === '#ffffff'
+  record(9, '[共存] 新层 --suj-ink-1 light=#000000 / dark=#FFFFFF（瑞士化重映射，独立解析）', sujOk, [
+    `light: --suj-ink-1 = ${sujVars.light}   （期望 #000000）`,
+    `dark : --suj-ink-1 = ${sujVars.dark}   （期望 #FFFFFF）`,
     sujOk
-      ? '--suj-ink-1 与旧 --ink-1(#E9EDF5) 各自独立换值：两条链互不干扰'
+      ? '--suj-ink-1 与旧 --ink-1 各自独立换值：两条链互不干扰'
       : '--suj-ink-1 为空或错值 → 新层原始变量未按 --suj- 前缀定义',
   ].join('\n'))
 
-  /* ── #10（共存锁·可读性）旧 utility bg-bg-3 + text-ink-1 对比度 ≥4.5:1 ──
-     这条正是应当抓出 Fix round 1 缺陷的断言：改名前 text-ink-1 经 --ink-1 解析到
-     新层 #1A1A18（暗墨），落在旧 bg-bg-3(#1D2330 暗面板)上 = 1.11:1，基本不可读；
-     改名后 --ink-1 回到旧值 #E9EDF5 → 13.4:1。**禁止放宽。** */
-  const legacyContrast = await page.evaluate(async (mod) => {
+  /* ── #10（可读性）真实渲染的墨色/底色对比度 ≥4.5:1 ──
+     原断言锁旧 utility bg-bg-3 + text-ink-1（并存期缺陷现场）。旧层随 Track C
+     删除后，改为锁新层的语义组合 surface + ink1 —— 现实页面的可读性下限。 */
+  const semanticContrast = await page.evaluate(async (mod) => {
     const m = await import(mod)
-    m.applyTheme('light')   // 浅色是默认主题，也是缺陷现场
+    m.applyTheme('light')
     const el = document.createElement('div')
-    el.className = 'bg-bg-3 text-ink-1'
-    el.textContent = 'Legacy cue row 00:00:01.000 中文样本'
+    el.className = 'bg-surface text-ink1'
+    el.textContent = 'Cue row 00:00:01.000 中文样本'
     document.body.appendChild(el)
     const cs = getComputedStyle(el)
     const fg = cs.color
@@ -457,14 +458,14 @@ async function runBrowserAssertions(page) {
     }
     return { fg, bg, ratio: ratio == null ? null : Math.round(ratio * 100) / 100 }
   }, THEME_MODULE)
-  const contrastOk = legacyContrast.ratio != null && legacyContrast.ratio >= 4.5
-  record(10, '[共存·可读性] 旧 utility bg-bg-3 + text-ink-1 对比度 ≥4.5:1', contrastOk, [
-    `.bg-bg-3.text-ink-1 computed color           = ${legacyContrast.fg}`,
-    `.bg-bg-3.text-ink-1 computed background-color = ${legacyContrast.bg}`,
-    `WCAG 对比度 = ${legacyContrast.ratio}:1   （门槛 ≥4.5:1）`,
+  const contrastOk = semanticContrast.ratio != null && semanticContrast.ratio >= 4.5
+  record(10, '[可读性] 语义组合 bg-surface + text-ink1 对比度 ≥4.5:1', contrastOk, [
+    `.bg-surface.text-ink1 computed color           = ${semanticContrast.fg}`,
+    `.bg-surface.text-ink1 computed background-color = ${semanticContrast.bg}`,
+    `WCAG 对比度 = ${semanticContrast.ratio}:1   （门槛 ≥4.5:1）`,
     contrastOk
-      ? '旧页面文字在默认（浅色）主题下可读 —— 缺陷根因（原始变量同名覆盖）已消除'
-      : '暗底暗字：新层覆盖了旧 --ink-1 → 这正是 Fix round 1 的阻塞缺陷，须改名 --suj-* 修复',
+      ? '正文墨色落在面板底上充分可读 —— 可读性下限锁保持'
+      : '墨色/底色对比不足 → 检查瑞士化后的 ink/surface token 值',
   ].join('\n'))
 }
 

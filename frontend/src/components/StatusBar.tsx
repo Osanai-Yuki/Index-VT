@@ -1,4 +1,6 @@
 // 底部状态栏（40px，等宽 11px；四组信息：模型 chip / VRAM / 空闲倒计时 / 隐私徽章）。
+// 单行不换行：整条 whitespace-nowrap，挤压只由 VRAM 进度条与「全本地推理」吸收。
+// 左内缩 = rail + pad-shell-x，首项与页面内容左缘对齐（DESIGN.md §5.13）。
 import { useAppStore } from '../stores/appStore'
 import { apiKeepAlive } from '../wailsapi'
 
@@ -16,6 +18,9 @@ const STATE_TEXT: Record<string, string> = {
   crashed: '崩溃',
 }
 
+/** 三枚 chip / 读数共用的胶囊样式；h-6 固定高度，避免文案长短改变行高 */
+const CHIP = 'inline-flex items-center gap-1.5 px-2.5 h-6 shrink-0 rounded-full border'
+
 export function StatusBar() {
   const status = useAppStore((s) => s.status)
   const orchState = useAppStore((s) => s.orchState)
@@ -32,57 +37,63 @@ export function StatusBar() {
   const running = orchState === 'running'
 
   return (
-    <footer className="h-10 bg-bg-1 border-t border-hairline flex items-center gap-4 px-4 font-mono text-[11px] text-ink-2 tracking-wide">
+    <footer
+      className="h-full bg-surface border-t border-line flex items-center gap-4 text-micro text-ink2 tracking-wide whitespace-nowrap overflow-hidden"
+      style={{
+        paddingLeft: 'calc(var(--suj-h-rail) + var(--suj-pad-shell-x))',
+        paddingRight: 'var(--suj-pad-shell-x)',
+      }}
+    >
       <span
-        className={`inline-flex items-center gap-1.5 px-2.5 py-[3px] rounded-full border ${
+        className={`${CHIP} ${
           running
-            ? 'text-teal border-[rgba(79,214,190,.35)] bg-teal-soft'
+            ? 'text-ok border-ok/40 bg-okSoft'
             : orchState === 'crashed'
-              ? 'text-danger border-[rgba(229,72,77,.35)] bg-danger-soft'
-              : 'border-hairline-2 bg-bg-2'
+              ? 'text-danger border-danger/40 bg-dangerSoft'
+              : 'border-lineStrong bg-sunken'
         }`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${running ? 'bg-teal' : orchState === 'crashed' ? 'bg-danger' : 'bg-ink-3'}`} />
+        <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${running ? 'bg-ok' : orchState === 'crashed' ? 'bg-danger' : 'bg-ink3'}`} />
         {MODEL_NAMES[modelId] ?? modelId} · {stateText}
         {running && status?.port ? ` :${status.port}` : ''}
       </span>
-      <span className="w-px h-4 bg-hairline-2" />
       {gpuTotal > 0 ? (
-        <span className="flex items-center gap-2">
-          <span>VRAM</span>
-          <span className="w-[90px] h-[5px] rounded-full bg-bg-3 overflow-hidden inline-block">
-            <i className="block h-full bg-teal" style={{ width: `${vramPct}%` }} />
+        <span className="flex items-center gap-2 min-w-0 shrink">
+          <span className="shrink-0">VRAM</span>
+          <span
+            className="w-24 min-w-4 shrink h-1 bg-sunken overflow-hidden inline-block"
+            title={`显存占用 ${vramPct}%`}
+          >
+            <i className="block h-full bg-ok" style={{ width: `${vramPct}%` }} />
           </span>
-          <span>
+          <span className="num shrink-0">
             {(gpuUsed / 1024).toFixed(1)} / {(gpuTotal / 1024).toFixed(1)} GB
           </span>
         </span>
       ) : (
-        <span>CPU 推理模式</span>
+        <span className="shrink-0">CPU 推理模式</span>
       )}
-      <span className="w-px h-4 bg-hairline-2" />
       {running && idleMin > 0 ? (
-        <span
-          className="text-accent cursor-pointer"
+        <button
+          type="button"
+          className="shrink-0 text-accent cursor-pointer bg-transparent border-0 p-0 text-micro tracking-wide"
           title="点击保持加载（重置空闲计时）"
           onClick={() => apiKeepAlive().catch(() => {})}
         >
-          空闲 {mm}:{String(ss).padStart(2, '0')} 后自动释放
-        </span>
+          空闲 <span className="num">{mm}:{String(ss).padStart(2, '0')}</span> 后自动释放
+        </button>
       ) : running ? (
-        <span className="text-accent">常驻加载</span>
+        <span className="shrink-0 text-accent">常驻加载</span>
       ) : (
-        <span className="text-ink-3">模型未加载（任务自动唤醒）</span>
+        <span className="shrink-0 text-ink3">模型未加载（任务自动唤醒）</span>
       )}
-      <span className="flex-1" />
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-[3px] rounded-full border border-hairline-2 bg-bg-2 text-teal">
-        <span className="w-1.5 h-1.5 rounded-full bg-teal" />
+      <span className="flex-1 min-w-0" />
+      <span className={`${CHIP} border-lineStrong bg-sunken text-ok`}>
+        <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-ok" />
         离线可用
       </span>
-      <span className="w-px h-4 bg-hairline-2" />
-      <span>全本地推理 · 零遥测</span>
-      <span className="w-px h-4 bg-hairline-2" />
-      <span>{status?.version ?? 'v1.0.0'}</span>
+      <span className="min-w-0 shrink truncate">全本地推理 · 零遥测</span>
+      <span className="num shrink-0">{status?.version ?? 'v1.0.0'}</span>
     </footer>
   )
 }

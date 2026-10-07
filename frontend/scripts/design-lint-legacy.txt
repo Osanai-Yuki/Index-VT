@@ -1,20 +1,8 @@
-# design-token lint 并存期白名单（Task 2.2）
-# 这是什么：下列文件是素笺新 token 层落地**之前**的旧实现（6 页面 + 旧组件 + store 等），
-#   含约 60 处硬编码色值、58 处任意值、6 处 outline-none、8 处 alert/confirm、2 处 emoji——
-#   不豁免则 npm run build 立刻失败。lint 对白名单外文件零容忍。
-# 为什么存在：Track B 只新增新层、不动旧代码；新旧两套 token 层并存到 Track C 迁移完为止。
-# Track C 规则：**每迁移完一个文件（该文件改用新 token 后）就删掉对应这一行**。
-#   白名单剩余行数 = 迁移进度。新文件一律禁止加入本清单。
-src/App.tsx
-src/LangSelect.tsx
-src/components/Rail.tsx
-src/components/StatusBar.tsx
-src/components/ui.tsx
-src/pages/MainTranslate.tsx
-src/pages/ModelHub.tsx
-src/pages/Onboarding.tsx
-src/pages/Settings.tsx
-src/pages/SubtitleWorkbench.tsx
-src/stores/appStore.ts
-src/styles/tokens.css
+# design-token lint 并存期白名单（Task 2.2 · 2026-10-06 Track C 收尾后仅余 1 行）
+# 这是什么：素笺新 token 层落地之前的旧实现豁免清单。Track C 已完成全部页面迁移，
+#   styles/tokens.css 与 components/ui.tsx 已删除——本清单只剩 wailsapi.ts 一行
+#   （绑定薄封装，无样式类；保留豁免因其 declare global 的 any 用法）。
+# Track C 规则（历史）：每迁移完一个文件就删掉对应这一行；新文件一律禁止加入本清单。
+#   迁移已完成的文件：App / Rail / StatusBar / appStore / MainTranslate / ModelHub /
+#   SubtitleWorkbench / Settings / Onboarding / LangSelect（10 行全部删除）。
 src/wailsapi.ts
