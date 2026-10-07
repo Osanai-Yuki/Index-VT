@@ -4,7 +4,7 @@
 // Track C 接线：EV.CUE 实时刷新译文列 + 终态后 SubGetDoc 拉权威快照；
 // alert 全部下线（toast）。事件订阅走 lib/wails 新事件层。
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clapperboard, Hash, Play, Upload } from 'lucide-react'
+import { Clapperboard, Hash, Play, RotateCcw, Upload } from 'lucide-react'
 import { Badge, Button, Segmented } from '../components/ui/index'
 import { toast } from '../stores/toastStore'
 import { useAppStore } from '../stores/appStore'
@@ -16,6 +16,7 @@ import {
   apiSubResumeQueue,
   apiSubCancelQueue,
   apiSubRetryFailed,
+  apiSubRetryCues,
   apiSubGetDoc,
   apiSubExport,
 } from '../wailsapi'
@@ -38,6 +39,8 @@ interface Doc {
   format: string
   encoding: string
   cues: Cue[]
+  /** 是否有进行中的翻译队列（SubGetDoc 权威快照，GetDoc 时按 queueCancel 计算） */
+  queueActive?: boolean
 }
 
 type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn' | 'danger'
@@ -57,6 +60,12 @@ function tc(ms: number) {
   const milli = ms % 1000
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(milli).padStart(3, '0')}`
 }
+
+// cue 表网格：表头与数据行必须共用同一常量，漂移即错位。
+// 时间列 168px：完整时码「00:00:42,540 → 00:44,000」24 个等宽字符 × 6.6px
+// （text-micro 11px × JetBrains Mono 0.6em 步进）≈ 158px，旧值 132px 时
+// whitespace-nowrap 的时码会压到原文列（真机 664 cue ASS 实测）。
+const CUE_GRID = '44px 168px 1fr 1fr 96px'
 
 const errToast = (e: unknown) =>
   toast.push({ tone: 'error', message: String((e as { message?: string })?.message ?? e) })
@@ -123,7 +132,23 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
 
   const queueOpt = { targetLang, bilingual: bilingual === '仅译文' ? 'translation-only' : bilingual === '双语双行' ? 'dual-line' : 'keep-original' }
 
+  // 拉一次权威快照：启动/取消/终态后刷新 queueActive（暂停/继续/取消的可用性跟着走）
+  const refreshDoc = () =>
+    setDoc((cur) => {
+      if (cur) apiSubGetDoc(cur.id).then((d) => d && setDoc(d)).catch(() => {})
+      return cur
+    })
+
+  // 全部翻译 = 整卷重翻（full）：换目标语言/双语模式后必须覆盖已翻条目，否则
+  // 同一文档混着两轮语言的译文；启动成功即拉快照，让暂停按钮在首条翻译期间就可用
+  const startFull = () =>
+    apiSubTranslate(doc!.id, { ...queueOpt, full: true })
+      .then(refreshDoc)
+      .then(refreshStatus)
+      .catch(errToast)
+
   const doneCount = doc ? doc.cues.filter((c) => c.state === 'done' || c.state === 'skipped').length : 0
+  const failedCount = doc ? doc.cues.filter((c) => c.state === 'failed').length : 0
 
   return (
     <div className="flex flex-col gap-3.5 h-full min-h-0 screen-in">
@@ -137,25 +162,36 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
             {doc.path.split(/[\\/]/).pop()} · <span className="num">{doc.cues.length}</span> cues · {doc.format.toUpperCase()}
           </Badge>
         )}
-        <Button kind="primary" disabled={!doc} onClick={() => apiSubTranslate(doc!.id, queueOpt).then(refreshStatus).catch(errToast)}>
+        <Button kind="primary" disabled={!doc} onClick={startFull} title="用当前目标语言与双语模式重翻全部条目（含已翻过的）">
           <Play size={14} /> 全部翻译
         </Button>
-        <Button disabled={!doc} onClick={() => apiSubPauseQueue(doc!.id).catch(errToast)}>
+        <Button disabled={!doc || !doc.queueActive} onClick={() => apiSubPauseQueue(doc!.id).then(refreshDoc).catch(errToast)}>
           暂停
         </Button>
-        <Button disabled={!doc} onClick={() => apiSubResumeQueue(doc!.id).catch(errToast)}>
+        <Button disabled={!doc || !doc.queueActive} onClick={() => apiSubResumeQueue(doc!.id).then(refreshDoc).catch(errToast)}>
           继续
         </Button>
-        <Button disabled={!doc} onClick={() => apiSubCancelQueue(doc!.id)}>
+        <Button
+          disabled={!doc || !doc.queueActive}
+          onClick={() => {
+            apiSubCancelQueue(doc!.id)
+            refreshDoc()
+            // 取消的收尾（goroutine 退出摘 queueCancel）是异步的，且被打断的 cue 不发终态
+            // 事件——补一次延迟刷新，否则暂停/继续会滞留在可用态
+            window.setTimeout(refreshDoc, 500)
+          }}
+        >
           取消
         </Button>
         <Button
-          disabled={!doc}
+          disabled={!doc || failedCount === 0}
           onClick={() =>
-            apiSubRetryFailed(doc!.id, queueOpt).catch((e) => setQueueMsg(String((e as { message?: string })?.message ?? e)))
+            apiSubRetryFailed(doc!.id, queueOpt)
+              .then(refreshDoc)
+              .catch((e) => setQueueMsg(String((e as { message?: string })?.message ?? e)))
           }
         >
-          重试失败
+          重试失败{failedCount > 0 ? `（${failedCount}）` : ''}
         </Button>
         <Segmented<string>
           options={['仅译文', '双语双行', '原文另存']}
@@ -235,7 +271,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
               </span>
             </div>
             <div className="grid px-3.5 pt-1.5 pb-2 border-b border-line text-micro tracking-caps text-ink3 uppercase"
-              style={{ gridTemplateColumns: '44px 132px 1fr 1fr 96px', gap: 10 }}>
+              style={{ gridTemplateColumns: CUE_GRID, gap: 10 }}>
               <span aria-hidden="true"><Hash size={11} strokeWidth={2} /></span>
               <span>起止时间</span>
               <span>原文</span>
@@ -251,7 +287,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                   className={`w-full grid px-3.5 py-2.5 border-b border-line text-left cursor-pointer transition-colors duration-150 items-center bg-transparent ${
                     selIdx === c.index ? 'bg-sunken border-l-2 border-l-accent' : 'hover:bg-sunken'
                   }`}
-                  style={{ gridTemplateColumns: '44px 132px 1fr 1fr 96px', gap: 10 }}
+                  style={{ gridTemplateColumns: CUE_GRID, gap: 10 }}
                 >
                   <span className="num text-micro text-ink3">{String(c.index).padStart(4, '0')}</span>
                   <span className="num text-micro text-ink2 whitespace-nowrap">
@@ -296,6 +332,21 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                       <Badge tone="warn" dot>
                         覆写标签回填失败，需人工检查
                       </Badge>
+                    )}
+                    {c.state === 'failed' && (
+                      // F-19 单条重试：failed → pending 重入队列（queue.go RetryCues，
+                      // 旧译文保留 B5 语义）；「重试失败」按钮是批量，这里是单条
+                      <Button
+                        kind="primary"
+                        onClick={() =>
+                          apiSubRetryCues(doc!.id, [c.index], queueOpt)
+                            .then(refreshDoc)
+                            .then(refreshStatus)
+                            .catch(errToast)
+                        }
+                      >
+                        <RotateCcw size={14} /> 重试本条
+                      </Button>
                     )}
                     {c.styleName && (
                       <div className="text-caption text-ink3">
