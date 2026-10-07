@@ -120,6 +120,91 @@ export namespace config {
 
 }
 
+export namespace docpipeline {
+	
+	export class ChunkState {
+	    index: number;
+	    text: string;
+	    translated?: string;
+	    state: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChunkState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.index = source["index"];
+	        this.text = source["text"];
+	        this.translated = source["translated"];
+	        this.state = source["state"];
+	    }
+	}
+	export class TermCoverage {
+	    term: string;
+	    translation: string;
+	    sourceChunks: number;
+	    hitChunks: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TermCoverage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.term = source["term"];
+	        this.translation = source["translation"];
+	        this.sourceChunks = source["sourceChunks"];
+	        this.hitChunks = source["hitChunks"];
+	    }
+	}
+	export class Doc {
+	    id: string;
+	    path: string;
+	    direction: string;
+	    glossary?: translator.GlossaryItem[];
+	    chunks: ChunkState[];
+	    charsTotal: number;
+	    coverage?: TermCoverage[];
+	    queueActive?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Doc(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.path = source["path"];
+	        this.direction = source["direction"];
+	        this.glossary = this.convertValues(source["glossary"], translator.GlossaryItem);
+	        this.chunks = this.convertValues(source["chunks"], ChunkState);
+	        this.charsTotal = source["charsTotal"];
+	        this.coverage = this.convertValues(source["coverage"], TermCoverage);
+	        this.queueActive = source["queueActive"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace envprobe {
 	
 	export class ResidualSweepResult {
@@ -255,6 +340,22 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class DocRequestUI {
+	    path: string;
+	    direction: string;
+	    glossaryId?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocRequestUI(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.direction = source["direction"];
+	        this.glossaryId = source["glossaryId"];
+	    }
 	}
 	export class SystemStatus {
 	    orchestration: string;
@@ -665,6 +766,20 @@ export namespace subtitle {
 
 export namespace translator {
 	
+	export class GlossaryItem {
+	    term: string;
+	    translation: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GlossaryItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.term = source["term"];
+	        this.translation = source["translation"];
+	    }
+	}
 	export class Lang {
 	    code: string;
 	    zhName: string;

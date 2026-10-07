@@ -162,7 +162,7 @@ func (e *Engine) Open(path string) (*SubtitleDoc, error) {
 	if err != nil {
 		return nil, err
 	}
-	text, enc := decodeText(raw)
+	text, enc := DecodeText(raw)
 	format := detectFormat(path, text)
 	if format == "" {
 		return nil, fmt.Errorf("无法识别字幕格式: %s", filepath.Base(path))

@@ -382,7 +382,7 @@ func TestDetectEncodingBOMOrder(t *testing.T) {
 		{"utf8bom", append([]byte{0xEF, 0xBB, 0xBF}, "1"...), "utf-8-bom"},
 	}
 	for _, c := range cases {
-		text, got := decodeText(c.raw)
+		text, got := DecodeText(c.raw)
 		if got != c.want {
 			t.Errorf("%s: 编码得到 %q，期望 %q", c.name, got, c.want)
 			continue

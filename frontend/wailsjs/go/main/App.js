@@ -62,6 +62,14 @@ export function DocExport(arg1, arg2) {
   return window['go']['main']['App']['DocExport'](arg1, arg2);
 }
 
+export function DocGetDoc(arg1) {
+  return window['go']['main']['App']['DocGetDoc'](arg1);
+}
+
+export function DocResume(arg1) {
+  return window['go']['main']['App']['DocResume'](arg1);
+}
+
 export function DocTranslate(arg1) {
   return window['go']['main']['App']['DocTranslate'](arg1);
 }

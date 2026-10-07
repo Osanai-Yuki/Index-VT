@@ -11,10 +11,11 @@ import (
 
 var bytesBOMUTF8 = []byte{0xEF, 0xBB, 0xBF}
 
-// decodeText 编码识别与解码（02 文档 §11.6）：BOM 优先，长 BOM 先判（UTF-32 LE
+// DecodeText 编码识别与解码（02 文档 §11.6）：BOM 优先，长 BOM 先判（UTF-32 LE
 // 与 UTF-16 LE 前两字节相同，B27）；无 BOM → UTF-8 有效性 → GBK/GB18030 兜底。
 // 返回 (文本, 编码名)；每个编码名都对应此处实际使用的解码器（识别与解码同点）。
-func decodeText(raw []byte) (string, string) {
+// 导出：长文档导入（docpipeline 经 app 层）复用同一套识别，避免两处口径漂移。
+func DecodeText(raw []byte) (string, string) {
 	if bytes.HasPrefix(raw, bytesBOMUTF8) {
 		return string(bytes.TrimPrefix(raw, bytesBOMUTF8)), "utf-8-bom"
 	}
