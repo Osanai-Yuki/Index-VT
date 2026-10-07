@@ -74,6 +74,10 @@ export function EndpointPort() {
   return window['go']['main']['App']['EndpointPort']();
 }
 
+export function EstimateCtxVRAM(arg1) {
+  return window['go']['main']['App']['EstimateCtxVRAM'](arg1);
+}
+
 export function ExportGlossaryCSV(arg1) {
   return window['go']['main']['App']['ExportGlossaryCSV'](arg1);
 }
@@ -172,6 +176,10 @@ export function SubCancelQueue(arg1) {
 
 export function SubExport(arg1, arg2) {
   return window['go']['main']['App']['SubExport'](arg1, arg2);
+}
+
+export function SubGetDoc(arg1) {
+  return window['go']['main']['App']['SubGetDoc'](arg1);
 }
 
 export function SubOpen() {

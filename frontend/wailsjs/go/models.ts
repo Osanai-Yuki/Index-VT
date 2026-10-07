@@ -55,6 +55,7 @@ export namespace config {
 	export class Inference {
 	    nglOverride: number;
 	    ctxTier: string;
+	    ctxTokensOverride: number;
 	    cpuThreads: number;
 	    tempOverride: boolean;
 	
@@ -66,6 +67,7 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.nglOverride = source["nglOverride"];
 	        this.ctxTier = source["ctxTier"];
+	        this.ctxTokensOverride = source["ctxTokensOverride"];
 	        this.cpuThreads = source["cpuThreads"];
 	        this.tempOverride = source["tempOverride"];
 	    }
@@ -210,6 +212,50 @@ export namespace envprobe {
 
 export namespace main {
 	
+	export class CtxEstimate {
+	    tokens: number;
+	    weightsMiB: number;
+	    kvMiB: number;
+	    activateMiB: number;
+	    totalMiB: number;
+	    gpu: envprobe.GPU;
+	    exceedsFree: boolean;
+	    basis: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CtxEstimate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tokens = source["tokens"];
+	        this.weightsMiB = source["weightsMiB"];
+	        this.kvMiB = source["kvMiB"];
+	        this.activateMiB = source["activateMiB"];
+	        this.totalMiB = source["totalMiB"];
+	        this.gpu = this.convertValues(source["gpu"], envprobe.GPU);
+	        this.exceedsFree = source["exceedsFree"];
+	        this.basis = source["basis"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SystemStatus {
 	    orchestration: string;
 	    activeModel: string;
@@ -277,6 +323,10 @@ export namespace main {
 	    dubbing?: boolean;
 	    syllables?: number;
 	    glossaryId?: number;
+	    hard?: string[];
+	    soft?: string[];
+	    genre?: string;
+	    jsonPreserve?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TranslateRequestUI(source);
@@ -290,6 +340,10 @@ export namespace main {
 	        this.dubbing = source["dubbing"];
 	        this.syllables = source["syllables"];
 	        this.glossaryId = source["glossaryId"];
+	        this.hard = source["hard"];
+	        this.soft = source["soft"];
+	        this.genre = source["genre"];
+	        this.jsonPreserve = source["jsonPreserve"];
 	    }
 	}
 

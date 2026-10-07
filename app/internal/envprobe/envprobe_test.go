@@ -1,9 +1,12 @@
 package envprobe
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // Task 1.15：runWithTimeout 的极短超时必须快速失败返回错误，
@@ -74,5 +77,24 @@ func TestQueryVRAMCachedSuppressesSecondProbeWithinTTL(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("TTL 过期后应重新探测：probe 次数 = %d, want 2", calls)
+	}
+}
+
+// B34 回归锁：runWithTimeout 的子进程必须带 CREATE_NO_WINDOW。GUI 主进程（无
+// 自身控制台）裸 spawn 控制台程序时 Windows 会新建可见控制台窗口，nvidia-smi
+// 秒退即黑窗闪现——状态栏 5s 轮询 + 显存缓存 15s TTL，用户看到的是每约 15s
+// 一次的间歇性后台弹窗。
+func TestHideConsoleWindowSetsCreateNoWindow(t *testing.T) {
+	cmd := &exec.Cmd{} // 不真正执行，只验证标志注入
+	hideConsoleWindow(cmd)
+	if cmd.SysProcAttr == nil || cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatal("子进程必须带 CREATE_NO_WINDOW，否则显存轮询会间歇性闪现控制台窗口")
+	}
+	// 幂等且不破坏调用方已有的 CreationFlags
+	const suspended = 0x4 // CREATE_SUSPENDED
+	cmd.SysProcAttr.CreationFlags |= suspended
+	hideConsoleWindow(cmd)
+	if got := cmd.SysProcAttr.CreationFlags; got&(windows.CREATE_NO_WINDOW|suspended) != windows.CREATE_NO_WINDOW|suspended {
+		t.Fatalf("已有 CreationFlags 应保留, got %#x", got)
 	}
 }

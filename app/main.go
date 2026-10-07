@@ -91,9 +91,9 @@ func main() {
 		Height:    800,
 		MinWidth:  1180,
 		MinHeight: 700,
-		// 与 DESIGN.md §9 浅色 --canvas (#FBFBFA) 一致：WebView2 首帧前默认白底，
-		// 深色主题下会先白后黑闪一下（B30）；预置设计基准底色消除该闪变。
-		BackgroundColour: &options.RGBA{R: 251, G: 251, B: 250, A: 255},
+		// 瑞士风格基准底色（#FFFFFF）：WebView2 首帧前默认白底，深色主题下会先白后黑
+		// 闪一下（B30）；预置设计基准底色消除该闪变。
+		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
 		AssetServer: &assetserver.Options{
 			Handler: http.FileServer(http.FS(assets())),
 		},

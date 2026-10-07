@@ -25,6 +25,7 @@ import (
 	"indexvt/internal/store"
 	"indexvt/internal/subtitle"
 	"indexvt/internal/translator"
+	"indexvt/internal/vramestimate"
 )
 
 // App 绑定对象。
@@ -280,7 +281,81 @@ func (a *App) sourcePref() string { return string(a.cfgSnapshot().Download.Sourc
 // 只做快照、不加 ensureReady 门禁 —— a.cfg 是值类型，零值即合法默认配置，
 // 门禁反而会让编排协程空等 30s。
 func (a *App) NGLOverride() int { return a.cfgSnapshot().Inference.NGLOverride }
-func (a *App) CtxTokens() int64 { return a.cfgSnapshot().Inference.CtxTier.Tokens() }
+func (a *App) CtxTokens() int64 { return a.cfgSnapshot().EffectiveCtxTokens() }
+
+// ---------- 上下文显存估算 ----------
+
+// CtxEstimate 上下文显存的**估算**（非实测）：对 01 文档 §3.2 表校准的线性模型，
+// 偏差 ±20% 量级（并发 slot / flash-attn / 驱动缓存都不在模型里）。单位一律 MiB，
+// 与 nvidia-smi 口径一致。前端文案必须写"预计"。
+type CtxEstimate struct {
+	Tokens      int64        `json:"tokens"`
+	WeightsMiB  int          `json:"weightsMiB"`
+	KvMiB       int          `json:"kvMiB"`
+	ActivateMiB int          `json:"activateMiB"`
+	TotalMiB    int          `json:"totalMiB"`
+	GPU         envprobe.GPU `json:"gpu"`
+	ExceedsFree bool         `json:"exceedsFree"`
+	Basis       string       `json:"basis"`
+}
+
+// estimateCtxVRAM 组装设置页要的结构化估算（纯函数，便于单测）。
+// **公式本体在 internal/vramestimate**，与 orchestrator 的 resolveNGL 共用同一份，
+// 避免两处各写一套常数而漂移（历史上就漂移过：见该包的文件头注释）。
+// weightsMiB 传 0 表示未知 → 由该包落到兜底权重。
+func estimateCtxVRAM(tokens int64, weightsMiB int, gpu envprobe.GPU) CtxEstimate {
+	e0 := vramestimate.For(tokens, weightsMiB)
+	basis := fmt.Sprintf("线性估算：权重 + ctx×%d/8192 + %d MiB（2026-10-06 实测标定，Nailong Q4_K_M 填满上下文拟合；单向偏保守 +3.5%%~15.7%%）",
+		vramestimate.KVPer8KMiB, vramestimate.FixedMiB)
+	if weightsMiB <= 0 {
+		basis += "；权重取 translate Q4_K_M 兜底值"
+	}
+	e := CtxEstimate{
+		Tokens:      tokens,
+		WeightsMiB:  e0.WeightsMiB,
+		KvMiB:       e0.KvMiB,
+		ActivateMiB: e0.ActivateMiB,
+		TotalMiB:    e0.TotalMiB,
+		GPU:         gpu,
+		Basis:       basis,
+	}
+	if !gpu.Present {
+		e.Basis += "；CPU 模式：无显存可估"
+		return e
+	}
+	e.ExceedsFree = e.TotalMiB > gpu.FreeMB
+	return e
+}
+
+// activeModelWeightsMiB 当前 active 模型已就位档位的最大体积（MiB）；取不到返回 0。
+func activeModelWeightsMiB(m *modelmanager.Manager) int {
+	for _, mi := range m.List() {
+		if !mi.Active {
+			continue
+		}
+		var best int64
+		for _, q := range mi.Quants {
+			if q.Present && q.SizeBytes > best {
+				best = q.SizeBytes
+			}
+		}
+		return int(best / (1024 * 1024))
+	}
+	return 0
+}
+
+// EstimateCtxVRAM 估算给定上下文长度的显存占用（设置页自定义档用）。
+func (a *App) EstimateCtxVRAM(tokens int64) (*CtxEstimate, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	if tokens < 2048 || tokens > 65536 {
+		return nil, fmt.Errorf("上下文长度需在 2048–65536 之间（当前 %d）", tokens)
+	}
+	gpu, _ := envprobe.QueryVRAMCached(15 * time.Second) // 15s TTL：显存是粗粒度指标，容忍滞后
+	e := estimateCtxVRAM(tokens, activeModelWeightsMiB(a.models), gpu)
+	return &e, nil
+}
 func (a *App) CPUThreads() int  { return a.cfgSnapshot().Inference.CPUThreads }
 func (a *App) IdleMinutes() int { return a.cfgSnapshot().Resource.IdleUnloadMinutes }
 
@@ -338,6 +413,11 @@ type TranslateRequestUI struct {
 	Dubbing    bool   `json:"dubbing,omitempty"`
 	Syllables  int    `json:"syllables,omitempty"`
 	GlossaryID int64  `json:"glossaryId,omitempty"`
+	// 约束抽屉五字段（Track C 接线；Hard/Soft 每行一条，Genre 空 = 后端默认"文本"）
+	Hard         []string `json:"hard,omitempty"`
+	Soft         []string `json:"soft,omitempty"`
+	Genre        string   `json:"genre,omitempty"`
+	JSONPreserve bool     `json:"jsonPreserve,omitempty"`
 }
 
 // TaskHandle 任务句柄。
@@ -398,6 +478,9 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 		taskCtx, cancel := context.WithCancel(a.ctx)
 		defer cancel()
 
+		// R17：累积已产出的部分译文——错误分支也要带给前端（error 态渲染部分译文 + 错误提示）
+		var partial strings.Builder
+
 		res, err := a.tr.Translate(taskCtx, translator.TranslateRequest{
 			TaskID:      taskID,
 			SourceLang:  source,
@@ -405,8 +488,11 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 			Text:        req.Text,
 			Mode:        mode,
 			Syllables:   req.Syllables,
-			Constraints: &translator.Constraints{Glossary: glossary},
-		}, func(delta string) { batcher.append(delta) })
+			Constraints: &translator.Constraints{Glossary: glossary, Hard: req.Hard, Soft: req.Soft, Genre: req.Genre, JSONPreserve: req.JSONPreserve},
+		}, func(delta string) {
+			partial.WriteString(delta)
+			batcher.append(delta)
+		})
 		batcher.close()
 		a.mu.Lock()
 		delete(a.deltas, taskID)
@@ -420,6 +506,10 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 			done["error"] = err.Error()
 			if errors.Is(err, translator.ErrCanceled) {
 				done["canceled"] = true
+			}
+			// R17：错误（含首字超时）前已流式产出的文本一并返回，前端不清空
+			if p := partial.String(); p != "" {
+				done["output"] = p
 			}
 		} else {
 			done["output"] = res.Output
@@ -611,15 +701,15 @@ func (a *App) AssignUnknown(path, id, quant string) (modelmanager.ModelInfo, err
 
 // SystemStatus 状态栏聚合数据。
 type SystemStatus struct {
-	Orchestration string                 `json:"orchestration"`
-	ActiveModel   string                 `json:"activeModel"`
-	Port          int                    `json:"port"`
-	GPU           envprobe.GPU           `json:"gpu"`
-	IdleMinutes   int                    `json:"idleMinutes"`
-	IdleSeconds   int                    `json:"idleSeconds"`
-	ActiveTasks   int                    `json:"activeTasks"`
-	Version       string                 `json:"version"`
-	Offline       bool                   `json:"offline"`
+	Orchestration string                   `json:"orchestration"`
+	ActiveModel   string                   `json:"activeModel"`
+	Port          int                      `json:"port"`
+	GPU           envprobe.GPU             `json:"gpu"`
+	IdleMinutes   int                      `json:"idleMinutes"`
+	IdleSeconds   int                      `json:"idleSeconds"`
+	ActiveTasks   int                      `json:"activeTasks"`
+	Version       string                   `json:"version"`
+	Offline       bool                     `json:"offline"`
 	Models        []modelmanager.ModelInfo `json:"models"`
 }
 
@@ -804,7 +894,7 @@ func (a *App) SubExport(docID string, opt subtitle.ExportOptions) error {
 func (a *App) DocTranslate(_ map[string]any) (string, error) {
 	return "", errors.New("文档翻译将于 M5 里程碑提供")
 }
-func (a *App) DocCancel(_ string) error   { return errors.New("文档翻译将于 M5 里程碑提供") }
+func (a *App) DocCancel(_ string) error { return errors.New("文档翻译将于 M5 里程碑提供") }
 func (a *App) DocExport(_ string, _ string) error {
 	return errors.New("文档翻译将于 M5 里程碑提供")
 }

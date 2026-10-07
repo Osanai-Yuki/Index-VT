@@ -1,6 +1,7 @@
 package modelmanager
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"os"
@@ -47,13 +48,13 @@ func (f *deadlockOrch) KeepAlive()               {}
 // stubOrchView 无害版本（不制造环路），供其他安全测试复用。
 type stubOrchView struct{}
 
-func (stubOrchView) State() string             { return "idle" }
-func (stubOrchView) CurrentModel() string      { return "" }
-func (stubOrchView) CurrentModelPath() string  { return "" }
-func (stubOrchView) EndpointPort() int         { return 0 }
-func (stubOrchView) ActiveTasks() int          { return 0 }
-func (stubOrchView) IdleSeconds() int          { return 0 }
-func (stubOrchView) KeepAlive()                {}
+func (stubOrchView) State() string            { return "idle" }
+func (stubOrchView) CurrentModel() string     { return "" }
+func (stubOrchView) CurrentModelPath() string { return "" }
+func (stubOrchView) EndpointPort() int        { return 0 }
+func (stubOrchView) ActiveTasks() int         { return 0 }
+func (stubOrchView) IdleSeconds() int         { return 0 }
+func (stubOrchView) KeepAlive()               {}
 
 func newManagerForTest(t *testing.T, orch OrchestratorView) *Manager {
 	t.Helper()
@@ -310,5 +311,82 @@ func TestAssignUnknownAcceptsGGUFInsideModels(t *testing.T) {
 	}
 	if mi.ID != string(ModelTranslate) {
 		t.Fatalf("指派结果 ID = %q", mi.ID)
+	}
+}
+
+// ---------- ListModels 的下载进度快照 ----------
+
+// TestListExposesDownloadProgress 前端进度条的渲染条件是 `state==='downloading' && download`，
+// 而 List() 过去从不填 Download 字段——后端明明在下载，界面却什么都不显示。
+// 这条锁住修复，并锁住"返回的是快照拷贝"：序列化发生在 m.mu 之外，
+// 若把 handle 里的活指针递出去，并发写会改写一份已经在编码的进度。
+func TestListExposesDownloadProgress(t *testing.T) {
+	m := newManagerForTest(t, stubOrchView{})
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	h := &downloadHandle{cancel: cancel, quant: QuantQ4KM, spec: Registry[0]}
+	m.mu.Lock()
+	m.downloads[string(Registry[0].ID)] = h
+	m.mu.Unlock()
+
+	m.progressSink(h)(DownloadProgress{
+		ModelID: string(Registry[0].ID), Quant: string(QuantQ4KM),
+		Phase: "downloading", BytesDone: 512, BytesTotal: 1024, SpeedBPS: 1 << 20,
+	})
+
+	list := m.List()
+	var found *ModelInfo
+	for i := range list {
+		if list[i].ID == string(Registry[0].ID) {
+			found = &list[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("List() 里找不到该模型")
+	}
+	if found.State != StateDownloading {
+		t.Fatalf("State = %q，期望 %q", found.State, StateDownloading)
+	}
+	if found.Download == nil {
+		t.Fatal("Download 为空 —— 进度条渲染不出来，正是原缺陷")
+	}
+	if found.Download.BytesDone != 512 || found.Download.Phase != "downloading" {
+		t.Fatalf("Download 快照不符：%+v", *found.Download)
+	}
+
+	m.progressSink(h)(DownloadProgress{Phase: "verifying", BytesDone: 1024, BytesTotal: 1024})
+	if found.Download.Phase != "downloading" || found.Download.BytesDone != 512 {
+		t.Fatalf("List() 交出的是活指针，快照被后续进度改写：%+v", *found.Download)
+	}
+}
+
+// TestProgressSinkDoesNotDeadlockWithList 存快照要拿 m.mu，List() 也拿 m.mu 读，
+// 且 sink 转发给事件回调必须在解锁之后。并发护栏手法同 B13（本机 -race 不可用）。
+func TestProgressSinkDoesNotDeadlockWithList(t *testing.T) {
+	m := newManagerForTest(t, stubOrchView{})
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	h := &downloadHandle{cancel: cancel, quant: QuantQ4KM, spec: Registry[0]}
+	m.mu.Lock()
+	m.downloads[string(Registry[0].ID)] = h
+	m.mu.Unlock()
+	sink := m.progressSink(h)
+
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for i := 0; i < 300; i++ {
+			wg.Add(2)
+			go func() { defer wg.Done(); _ = m.List() }()
+			go func() { defer wg.Done(); sink(DownloadProgress{Phase: "downloading", BytesDone: int64(i)}) }()
+		}
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("List × progressSink 并发疑似死锁")
 	}
 }

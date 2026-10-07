@@ -44,25 +44,25 @@ type QuantStatus struct {
 
 // ModelInfo 模型中心卡片数据。
 type ModelInfo struct {
-	ID        string        `json:"id"`
-	Name      string        `json:"name"`
-	Role      string        `json:"role"`
-	Languages string        `json:"languages"`
-	Repo      string        `json:"repo"`
-	State     ModelState    `json:"state"`
-	Active    bool          `json:"active"`
-	Port      int           `json:"port,omitempty"`
-	Quants    []QuantStatus `json:"quants"`
-	Source    string        `json:"source,omitempty"` // 上次下载源徽标
-	IdleSec   int           `json:"idleSec,omitempty"` // 运行中：空闲秒数（倒计时）
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Role      string            `json:"role"`
+	Languages string            `json:"languages"`
+	Repo      string            `json:"repo"`
+	State     ModelState        `json:"state"`
+	Active    bool              `json:"active"`
+	Port      int               `json:"port,omitempty"`
+	Quants    []QuantStatus     `json:"quants"`
+	Source    string            `json:"source,omitempty"`  // 上次下载源徽标
+	IdleSec   int               `json:"idleSec,omitempty"` // 运行中：空闲秒数（倒计时）
 	Download  *DownloadProgress `json:"download,omitempty"`
-	IsUnknown bool          `json:"isUnknown,omitempty"`
-	Path      string        `json:"path,omitempty"` // 未知文件用
+	IsUnknown bool              `json:"isUnknown,omitempty"`
+	Path      string            `json:"path,omitempty"` // 未知文件用
 }
 
 // OrchestratorView modelmanager 感知编排状态所需的最小接口（避免循环依赖）。
 type OrchestratorView interface {
-	State() string                 // orchestrator.OrchestrationState 字符串
+	State() string // orchestrator.OrchestrationState 字符串
 	CurrentModel() string
 	CurrentModelPath() string
 	EndpointPort() int
@@ -92,6 +92,22 @@ type downloadHandle struct {
 	cancel context.CancelFunc
 	quant  QuantKind
 	spec   ModelSpec
+	// progress 是最近一次进度快照，由 m.mu 保护，供 ListModels 读取——
+	// 前端刷新/切页回来时不必依赖事件缓存也能看到进度条。
+	progress DownloadProgress
+}
+
+// progressSink 存下进度快照后再转发给事件回调。
+// 存与发必须分离：runtime.EventsEmit 不得在持有 m.mu 时调用。
+func (m *Manager) progressSink(h *downloadHandle) func(DownloadProgress) {
+	return func(p DownloadProgress) {
+		m.mu.Lock()
+		h.progress = p
+		m.mu.Unlock()
+		if m.onProgress != nil {
+			m.onProgress(p)
+		}
+	}
 }
 
 // New 创建 Manager。sourcePrefFn 返回 "auto"|"hf"|"modelscope"。
@@ -133,7 +149,7 @@ func (m *Manager) SetActiveID(id string) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) sourcePref() string            { return m.sourcePrefFn() }
+func (m *Manager) sourcePref() string { return m.sourcePrefFn() }
 func (m *Manager) setCurrentSource(id, s string) {
 	m.mu.Lock()
 	m.curSource[id] = s
@@ -296,6 +312,8 @@ func (m *Manager) List() []ModelInfo {
 		}
 		if d := m.downloads[string(spec.ID)]; d != nil {
 			mi.State = StateDownloading
+			snap := d.progress // 拷一份：ListModels 序列化在锁外，不能留活指针
+			mi.Download = &snap
 		} else if mi.Active && curModel != "" {
 			switch orchState {
 			case "running":
@@ -318,7 +336,11 @@ func (m *Manager) List() []ModelInfo {
 		} else {
 			mi.State = StateReady
 		}
-		if !anyPresent(mi.Quants) {
+		// 「文件未登记 ⇒ 未下载」这条兜底不得覆盖下载中：首次下载时文件要等校验通过
+		// 才登记进 store，此前 anyPresent 恒为 false，会把上面刚设好的 StateDownloading
+		// 改回 not-downloaded —— 前端进度条与暂停/取消按钮都挂在 state==='downloading' 上，
+		// 于是点下载后整段时间界面毫无反应（2026-10-06 定位）。
+		if !anyPresent(mi.Quants) && mi.State != StateDownloading {
 			mi.State = StateNotDownloaded
 		}
 		out = append(out, mi)
@@ -372,7 +394,10 @@ func (m *Manager) Download(id ModelID, quant QuantKind) (<-chan DownloadProgress
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan DownloadProgress, 128)
-	m.downloads[string(id)] = &downloadHandle{cancel: cancel, quant: quant, spec: spec}
+	h := &downloadHandle{cancel: cancel, quant: quant, spec: spec}
+	h.progress = DownloadProgress{ModelID: string(id), Quant: string(quant), Phase: "probing",
+		Message: "准备下载…"} // 先给一帧，避免点击到首个事件之间的空窗
+	m.downloads[string(id)] = h
 	m.mu.Unlock()
 	m.notify()
 
@@ -383,7 +408,7 @@ func (m *Manager) Download(id ModelID, quant QuantKind) (<-chan DownloadProgress
 			m.mu.Unlock()
 			m.notify()
 		}()
-		err := m.startDownload(ctx, spec, quant, ch, m.onProgress)
+		err := m.startDownload(ctx, spec, quant, ch, m.progressSink(h))
 		if err != nil && ctx.Err() == nil {
 			m.log.Error("download failed", "model", id, "err", err)
 		}

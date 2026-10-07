@@ -57,6 +57,7 @@ func runWithTimeout(timeout time.Duration, name string, args ...string) ([]byte,
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = filepath.Dir(bin) // 不让 cwd 参与后续子进程搜索
+	hideConsoleWindow(cmd)      // B34：压掉控制台子进程的窗口闪现（GUI 进程裸 spawn nvidia-smi 会每 15s 闪一次黑窗）
 	out, err := cmd.Output()
 	if ctx.Err() == context.DeadlineExceeded {
 		return nil, fmt.Errorf("%s 执行超时（%s）", name, timeout)

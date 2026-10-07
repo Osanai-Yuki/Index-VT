@@ -22,6 +22,14 @@ func (t CtxTier) Tokens() int64 {
 	}
 }
 
+// EffectiveCtxTokens 生效的上下文长度：自定义覆盖优先，否则回落预设档。
+func (c Config) EffectiveCtxTokens() int64 {
+	if c.Inference.CtxTokensOverride > 0 {
+		return int64(c.Inference.CtxTokensOverride)
+	}
+	return c.Inference.CtxTier.Tokens()
+}
+
 // SourcePref 模型下载源偏好（ADR-005）。
 type SourcePref string
 
@@ -41,7 +49,8 @@ const (
 
 type Inference struct {
 	NGLOverride int  `json:"nglOverride"` // -1=自动（GPU 99 / CPU 0），否则用户固定值
-	CtxTier     CtxTier `json:"ctxTier"`  // llama-server -c
+	CtxTier     CtxTier `json:"ctxTier"`  // llama-server -c（预设档）
+	CtxTokensOverride int `json:"ctxTokensOverride"` // 0=跟随预设档；否则 2048-65536，Normalize 夹取并对齐 1024
 	CPUThreads  int  `json:"cpuThreads"`  // 0=自动（物理核心数）
 	TempOverride bool `json:"tempOverride"` // 高级区温度覆盖开关（默认关：三模型默认参数已最优）
 }
@@ -103,6 +112,18 @@ func (c *Config) Normalize() {
 	case Ctx8K, Ctx16K, Ctx32K:
 	default:
 		c.Inference.CtxTier = Ctx8K
+	}
+	// 自定义 ctx：负值判为无效（回落预设档）；有效值夹取到 [2048, 65536] 并对齐 1024。
+	if v := c.Inference.CtxTokensOverride; v < 0 {
+		c.Inference.CtxTokensOverride = 0
+	} else if v > 0 {
+		if v < 2048 {
+			v = 2048
+		}
+		if v > 65536 {
+			v = 65536
+		}
+		c.Inference.CtxTokensOverride = (v + 512) / 1024 * 1024
 	}
 	if c.Inference.NGLOverride < -1 || c.Inference.NGLOverride > 999 {
 		c.Inference.NGLOverride = -1
