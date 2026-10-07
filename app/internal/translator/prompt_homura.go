@@ -100,3 +100,44 @@ func BuildNailongPrompt(d NailongDirection, text string) (string, error) {
 	}
 	return strings.Replace(tmpl, marker, text, 1), nil
 }
+
+// nailongInjectAnchor 四方向模板共有的收尾句：固定译名注入点（M5 报告 §7.11）。
+const nailongInjectAnchor = "只输出译文，不要有任何额外说明。"
+
+// BuildNailongPromptWithGlossary 官方模板 + 固定译名注入（§7.11 (b') 实证路径）。
+// 注入为【约束要求】第 4 条、插在收尾句之前，不新增占位符——「恰好 1 个占位符」
+// 断言仍成立。格式逐字复刻 spike run_drift.mjs 的实证版本（竞争译名 8→0，
+// 成本 +1.0% prompt token / +5.4% 耗时）：
+//
+//	4. 固定译名（下列词条必须逐字使用，不得改写、不得另行音译或意译）：
+//	   王妃→Queen
+//	   （空行）
+//	只输出译文，不要有任何额外说明。
+func BuildNailongPromptWithGlossary(d NailongDirection, text string, glossary []GlossaryItem) (string, error) {
+	prompt, err := BuildNailongPrompt(d, text)
+	if err != nil {
+		return "", err
+	}
+	if len(glossary) == 0 {
+		return prompt, nil
+	}
+	var b strings.Builder
+	b.WriteString("4. 固定译名（下列词条必须逐字使用，不得改写、不得另行音译或意译）：\n")
+	n := 0
+	for _, it := range glossary {
+		term := strings.TrimSpace(it.Term)
+		tr := strings.TrimSpace(it.Translation)
+		if term == "" || tr == "" {
+			continue
+		}
+		b.WriteString("   " + term + "→" + tr + "\n")
+		n++
+	}
+	if n == 0 {
+		return prompt, nil
+	}
+	if !strings.Contains(prompt, nailongInjectAnchor) {
+		return "", errBadTemplate(d) // 锚点缺失 = 模板被动过，拒绝注入
+	}
+	return strings.Replace(prompt, nailongInjectAnchor, b.String()+"\n"+nailongInjectAnchor, 1), nil
+}

@@ -278,17 +278,35 @@ func extraFromSpec(spec modelmanager.ModelSpec) requestExtra {
 //     本服务端构建对 prompt+max_tokens 超限返回 HTTP 400（§7.6），放大必须让位；
 //     余量不足基值时维持基值（不比历史更差），ctx 未知（Deps 未接）时同样只保基值。
 func (t *Translator) translateMaxTokens(spec modelmanager.ModelSpec, text string) int {
-	base := spec.MaxTokens
+	return maxTokensFor(spec.MaxTokens, text, t.ctxTokens())
+}
+
+// maxTokensFor 翻译档 max_tokens 预算（M5 报告 §9 步 2）。
+//
+//  1. 基值取注册表（Translate 1024）；0 视同 1024 下限——短文本行为与历史逐字节一致。
+//  2. 长文本按估算放大：实测 zh→en 输出 ≈0.893 token/源字（§7.3），估算取
+//     输出 ≤ 2×源文 token + 128，双向留足余量。
+//  3. 钳制到 ctx 余量：估算 prompt = 源文 token + 模板/约束头 768 + 估算误差 128。
+//     本服务端构建对 prompt+max_tokens 超限返回 HTTP 400（§7.6），放大必须让位；
+//     余量不足基值时维持基值（不比历史更差），ctx 未知（Deps 未接）时同样只保基值。
+func maxTokensFor(base int, text string, ctxTokens int) int {
 	if base < 1024 {
 		base = 1024
 	}
 	srcTok := EstimateTokens(text)
-	if ctx := t.ctxTokens(); ctx > 0 {
-		if room := ctx - srcTok - 896; room > base {
+	if ctxTokens > 0 {
+		if room := ctxTokens - srcTok - 896; room > base {
 			return max(base, min(2*srcTok+128, room))
 		}
 	}
 	return base
+}
+
+// MaxTokensForBudget 长文档分块路径的 max_tokens 预算——与请求路径共用同一公式
+//（M5 报告 §11 对齐约定的执行点）。docpipeline 每块调用它，保证分块器放行的块
+// 在此不被截断；两处公式一旦漂移，translator 侧的 M5ChunkCeiling 钉子测试会失败。
+func MaxTokensForBudget(text string, ctxTokens int) int {
+	return maxTokensFor(0, text, ctxTokens) // 基值 0 → 1024 下限，与 Nailong 注册表档一致
 }
 
 func (t *Translator) ctxTokens() int {
@@ -321,6 +339,40 @@ func (r TranslateRequest) constraints() *Constraints {
 		return r.Constraints
 	}
 	return &Constraints{}
+}
+
+// TranslateRawSync 非流式、外部构造 prompt（docpipeline 的 Nailong 方向模板路径用——
+// prompt 由管线层按官方模板+术语注入组装，不走本包的 mode 路径）。
+// 采样参数按 modelID 从冻结注册表合并（Nailong 的 stop_token_ids/seed/top_k），
+// maxTokens 由调用方按分块预算给定（§11 对齐约定：分块器放行的块在此不被截断）。
+func (t *Translator) TranslateRawSync(ctx context.Context, modelID, prompt string, maxTokens int) (string, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return "", ErrEmptyText
+	}
+	baseURL, _, err := t.deps.ResolveEndpoint(ctx, modelID)
+	if err != nil {
+		return "", err
+	}
+	if t.deps.OnTaskFinish != nil {
+		defer t.deps.OnTaskFinish(modelID)
+	}
+	spec, _ := modelmanager.SpecByID(modelmanager.ModelID(modelID))
+	httpReq := ChatRequest{
+		Model:       t.deps.ModelName(modelID),
+		Messages:    []ChatMessage{{Role: "user", Content: prompt}},
+		Temperature: spec.Temperature,
+		MaxTokens:   maxTokens,
+		ChatTemplateKwargs: map[string]any{"enable_thinking": false},
+	}
+	applyExtra(&httpReq, extraFromSpec(spec))
+	text, _, err := newChatClient(baseURL).Chat(ctx, httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ErrCanceled
+		}
+		return "", err
+	}
+	return text, nil
 }
 
 // CancelActive 取消进行中任务（01 文档 §5.3：前端 ≤100ms 反馈）。

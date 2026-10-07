@@ -1,45 +1,11 @@
-// Package docpipeline 长文档翻译（01 文档 §5.5）——M5 里程碑范围。
+// Package docpipeline 长文档翻译（01 文档 §5.5）——M5 里程碑实现。
 //
-// M2 仅冻结接口扩展点（任务书：接口与状态机须为后续里程碑预留扩展点）。
-// 实现前置依赖：Index-Nailong-2B 下载（modelmanager）、ctx 档位（8K/16K/32K，
-// orchestrator -c 参数已就绪）、stop_token_ids 请求扩展（translator 已就绪）。
+// 结构：chunker.go（token 预算分块）+ pipeline.go（块级状态机与队列）。
+// prompt 由管线层按官方方向模板组装（translator.BuildNailongPromptWithGlossary，
+// §7.11 (b') 术语注入），采样参数按 Nailong 注册表档合并（stop_token_ids/seed），
+// max_tokens 每块经 translator.MaxTokensForBudget 与请求钳制同源（§11 对齐约定）。
+// 生命周期与覆盖率口径见 M5 报告 §10 决策记录。
 package docpipeline
-
-import "context"
-
-// Direction Nailong 固定方向模板。
-type Direction string
-
-const (
-	DirZhEn Direction = "zh-en"
-	DirEnZh Direction = "en-zh"
-	DirZhJa Direction = "zh-ja"
-	DirJaZh Direction = "ja-zh"
-)
-
-// CtxTier ctx 档位（02 文档 §3：UI 仅暴露 8K/16K/32K，M5 实装）。
-type CtxTier string
-
-const (
-	Tier8K  CtxTier = "8K"
-	Tier16K CtxTier = "16K"
-	Tier32K CtxTier = "32K"
-)
-
-// DocRequest 长文档翻译请求。
-type DocRequest struct {
-	Path      string
-	Direction Direction
-	CtxTier   CtxTier
-}
-
-// DocProgress 文档翻译进度事件。
-type DocProgress struct {
-	DocID       string `json:"docId"`
-	CharsDone   int    `json:"charsDone"`
-	CharsTotal  int    `json:"charsTotal"`
-	ETASeconds  int    `json:"etaSeconds"`
-}
 
 // ExportKind 导出类型。
 type ExportKind string
@@ -49,9 +15,13 @@ const (
 	ExportBilingual   ExportKind = "bilingual"
 )
 
-// Pipeline 长文档管线接口（M5 实现）。
-type Pipeline interface {
-	Translate(ctx context.Context, req DocRequest, onProgress func(DocProgress)) error
-	Export(docID string, kind ExportKind) error
-	Cancel(docID string) error
+// DocProgress 文档翻译进度事件（01 文档 §5.5 冻结口径：按字符）。
+// ChunkIndex/State 为增量标注（omitempty）：哪一块、进入什么状态，供 UI 高亮当前块。
+type DocProgress struct {
+	DocID      string `json:"docId"`
+	CharsDone  int    `json:"charsDone"`
+	CharsTotal int    `json:"charsTotal"`
+	ETASeconds int    `json:"etaSeconds"`
+	ChunkIndex int    `json:"chunkIndex,omitempty"`
+	State      string `json:"state,omitempty"`
 }
