@@ -78,6 +78,10 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
   })
   // 翻译模式（领域模板）：切换即整套预填；手动改任一约束字段自动落到"自定义"档
   const [modeId, setModeId] = useState('standard')
+  // 配音模式（ADR-004：ModeDubbing → Index-Homura-2B，音节预算翻译；01 文档 §6.2）
+  const [dubbing, setDubbing] = useState(false)
+  const [syllables, setSyllables] = useState(7) // 默认取 F-07 验收用例值
+  const [syl, setSyl] = useState<{ target: number; actual: number } | null>(null)
   const customModes = useModeStore((s) => s.customModes)
   const modeOptions = allModes(customModes)
   const activeModeDesc =
@@ -109,7 +113,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
       setPhase((p) => (p === 'loading' ? 'streaming' : p))
     })
     const offDone = on(EV.DONE, (d) => {
-      const done = d as { taskId?: string; error?: string; canceled?: boolean; output?: string; tokPerSec?: number; firstTokenMs?: number; offTarget?: boolean }
+      const done = d as { taskId?: string; error?: string; canceled?: boolean; output?: string; tokPerSec?: number; firstTokenMs?: number; offTarget?: boolean; targetSyllables?: number; actualSyllables?: number }
       if (done.taskId !== taskId) return
       setTaskId(null)
       if (done.error && !done.canceled) {
@@ -127,6 +131,8 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
       setOutput(done.output ?? '')
       setMetrics({ tokPerSec: done.tokPerSec, firstTokenMs: done.firstTokenMs })
       setOffTarget(!!done.offTarget)
+      // 配音模式回显「目标 N / 实测 M」：后端仅在 dubbing 时发非零 targetSyllables
+      setSyl(done.targetSyllables ? { target: done.targetSyllables, actual: done.actualSyllables ?? 0 } : null)
       setPhase('done')
       refreshHistory()
     })
@@ -148,6 +154,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
     setError(null)
     setOffTarget(false)
     setMetrics({})
+    setSyl(null)
     setPhase('loading')
     apiTranslate({
       sourceLang: sourceLang,
@@ -158,6 +165,8 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
       genre: cons.genre.trim() || undefined,
       jsonPreserve: cons.jsonPreserve || undefined,
       glossaryId: cons.glossaryId || undefined,
+      dubbing: dubbing || undefined,
+      syllables: dubbing ? syllables : undefined,
     })
       .then((h) => {
         setTaskId(h.taskId)
@@ -168,7 +177,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
         setError(String(e?.message ?? e))
         setPhase('error')
       })
-  }, [input, sourceLang, targetLang, taskId, cons])
+  }, [input, sourceLang, targetLang, taskId, cons, dubbing, syllables])
 
   // Ctrl+Enter 翻译 / Esc 取消 / Ctrl+Shift+C 复制译文
   useEffect(() => {
@@ -422,7 +431,35 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
             label="查看当前模式详情"
             onClick={() => setModeDetail(modeOptions.find((m) => m.id === modeId) ?? null)}
           />
+          {/* 配音模式（F-07）：ModeDubbing → Index-Homura-2B，音节预算翻译（01 文档 §6.2） */}
+          <label className="flex items-center gap-2 shrink-0 whitespace-nowrap pl-1">
+            <span className="text-micro uppercase tracking-caps text-ink3">配音</span>
+            <Switch checked={dubbing} onChange={setDubbing} label="配音模式" srOnly />
+          </label>
+          {dubbing && (
+            <label className="flex items-center gap-2 shrink-0 whitespace-nowrap" title="译文音节预算（配音时长对齐；2B 为近似达标，偏差大可重新生成）">
+              <span className="text-micro uppercase tracking-caps text-ink3">音节</span>
+              <input
+                type="number"
+                aria-label="目标音节数"
+                min={1}
+                max={99}
+                step={1}
+                value={syllables}
+                onChange={(e) => {
+                  const n = e.target.valueAsNumber
+                  if (!Number.isNaN(n)) setSyllables(Math.round(n))
+                }}
+                className="num h-(--suj-h-control) w-16 bg-sunken border border-line px-2.5 text-right text-body text-ink1"
+              />
+            </label>
+          )}
           <div className="ml-auto flex items-center gap-2 shrink-0 whitespace-nowrap">
+            {dubbing && (
+              <Badge tone="accent" dot title="配音模式：本次翻译由 Index-Homura-2B 执行（音节预算）">
+                配音 · Index-Homura-2B
+              </Badge>
+            )}
             <Badge tone={orchState === 'running' ? 'ok' : 'neutral'} dot>
               模型：{orchState === 'running' ? '运行中' : orchState === 'idle' ? '休眠' : orchState}
             </Badge>
@@ -433,6 +470,12 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
         {/* 约束抽屉（真实 Constraints：Glossary / Hard / Soft / Genre / JSONPreserve） */}
         <Drawer open={consOpen} onClose={() => setConsOpen(false)} title="翻译约束" width={420}>
           <div className="flex flex-col gap-5">
+            {dubbing && (
+              <p className="text-caption text-ink3">
+                配音模式（Index-Homura-2B）仅术语本与目标音节数生效；硬/软约束与文体域属于
+                Translate 模型的普通翻译档，字段值会保留，切回普通模式即恢复生效。
+              </p>
+            )}
             <label className="flex flex-col gap-1.5 text-body text-ink2">
               术语本
               <select
@@ -526,6 +569,11 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
                   {metrics.tokPerSec.toFixed(1)} tok/s · TTFT {((metrics.firstTokenMs ?? 0) / 1000).toFixed(2)}s
                 </Badge>
               ) : null}
+              {dubbing && syl && phase === 'done' && (
+                <Badge tone="neutral" dot title="2B 音节控制为近似达标；偏差大可重新生成（temperature 0.3 产出不同表述）">
+                  目标 {syl.target} / 实测 {syl.actual}
+                </Badge>
+              )}
             </div>
             <div ref={outRef} className="flex-1 overflow-auto px-5 pb-4">
               {phase === 'error' && (
@@ -552,7 +600,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
                 {copied === 'both' ? '已复制' : '复制原文与译文'}
               </Button>
               <Button onClick={doTranslate} disabled={!input.trim() || !!taskId} arrow>
-                <RotateCcw size={14} /> 重新翻译
+                <RotateCcw size={14} /> {dubbing ? '重新生成' : '重新翻译'}
               </Button>
               {taskId && (
                 <Button
