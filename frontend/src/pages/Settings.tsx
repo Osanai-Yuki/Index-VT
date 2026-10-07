@@ -2,7 +2,7 @@
 // 推理 / 资源 / 下载 / 外观与数据 / 关于。
 // Track C：主题与字号控件真正可改（theme.ts applyTheme/applyFontSize + 配置持久化）；
 // confirm/alert 下线（Modal 破坏性确认 + toast）；新原语组合 + 瑞士 token。
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Plus } from 'lucide-react'
 import { Badge, Button, Field, Modal, Segmented, Slider, Switch, Textarea } from '../components/ui/index'
@@ -95,6 +95,46 @@ export function SettingsPage() {
     }, 300)
     return () => window.clearTimeout(t)
   }, [ctxSel, ctxDraftK])
+
+  // ── 预设档显存门（F-08b）────────────────────────────────────
+  // 三个预设档各拉一次估算：超可用显存的档位置灰（title 给原因），32K 挂「推荐」
+  // 徽标（F-08 验收档位）。当前选中值不置灰——落库后 GPU 条件变化不能锁死用户，
+  // 此时的超出由状态行如实呈现。估算失败（无 GPU/接口异常）不门禁，行为同旧版。
+  const [presetEst, setPresetEst] = useState<Record<string, any>>({})
+  useEffect(() => {
+    let alive = true
+    const tiers = ['8K', '16K', '32K'] as const
+    const TOK: Record<(typeof tiers)[number], number> = { '8K': 8192, '16K': 16384, '32K': 32768 }
+    Promise.all(
+      tiers.map((k) => apiEstimateCtxVRAM(TOK[k]).then((e) => [k, e] as const).catch(() => [k, null] as const)),
+    ).then((entries) => {
+      if (!alive) return
+      const next: Record<string, any> = {}
+      for (const [k, e] of entries) if (e) next[k] = e
+      setPresetEst(next)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const presetMeta = useMemo(() => {
+    const meta: Record<string, { disabled?: boolean; badge?: string; title?: string }> = {
+      '32K': { badge: '推荐' },
+    }
+    for (const k of ['8K', '16K', '32K']) {
+      const est = presetEst[k]
+      if (est?.gpu?.present && est.exceedsFree && ctxSel !== k) {
+        meta[k] = { ...meta[k], badge: undefined, disabled: true, title: '预计显存占用超过当前可用显存' }
+      }
+    }
+    return meta
+  }, [presetEst, ctxSel])
+
+  // 当前选中的预设档也显示占用状态行（与自定义档同一口径，数字来自同一估算接口）
+  const selPresetEst = ctxSel !== '自定义' ? presetEst[ctxSel] : null
+  // 当前生效估算：自定义档 = 去抖草稿估算；预设档 = 装载时快照
+  const activeEst = ctxSel === '自定义' ? ctxEst : selPresetEst
 
   const onCtxSelect = (v: string) => {
     if (v === '自定义') {
@@ -193,11 +233,12 @@ export function SettingsPage() {
             恢复默认
           </Button>
         </Row>
-        <Row title="上下文档位" desc="影响 KV cache 显存占用">
+        <Row title="上下文档位" desc="影响 KV cache 显存占用；超出可用显存的档位会被置灰">
           <Segmented<string>
             options={['8K', '16K', '32K', '自定义']}
             value={ctxSel}
             aria-label="上下文档位"
+            optionMeta={presetMeta}
             onChange={onCtxSelect}
           />
         </Row>
@@ -220,12 +261,14 @@ export function SettingsPage() {
             <span className="text-caption text-ink3">K</span>
           </Row>
         )}
-        {ctxSel === '自定义' && ctxEst && (
-          <div className={`px-5 pb-3 -mt-2 text-caption ${ctxEst.exceedsFree && ctxEst.gpu?.present ? 'text-danger' : 'text-ink3'}`}>
-            {ctxEst.gpu?.present
-              ? `预计占用 ${(ctxEst.totalMiB / 1024).toFixed(1)} GB / 当前可用 ${(ctxEst.gpu.freeMB / 1024).toFixed(1)} GB`
-              : `CPU 模式：无显存可估，ctx 越大越慢（预计内存 ${(ctxEst.totalMiB / 1024).toFixed(1)} GB）`}
-            {ctxEst.exceedsFree && ctxEst.gpu?.present ? ' —— 超过可用显存，保存前会再确认' : ''}
+        {activeEst && (
+          <div className={`px-5 pb-3 -mt-2 text-caption ${activeEst.exceedsFree && activeEst.gpu?.present ? 'text-danger' : 'text-ink3'}`}>
+            {activeEst.gpu?.present
+              ? `预计占用 ${(activeEst.totalMiB / 1024).toFixed(1)} GB / 当前可用 ${(activeEst.gpu.freeMB / 1024).toFixed(1)} GB`
+              : `CPU 模式：无显存可估，ctx 越大越慢（预计内存 ${(activeEst.totalMiB / 1024).toFixed(1)} GB）`}
+            {activeEst.exceedsFree && activeEst.gpu?.present
+              ? (ctxSel === '自定义' ? ' —— 超过可用显存，保存前会再确认' : ' —— 超过可用显存，请选更低档位')
+              : ''}
           </div>
         )}
         <Row title="CPU 线程数" desc="CPU 推理与 KV 分层时生效；0 = 自动">
