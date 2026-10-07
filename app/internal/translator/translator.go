@@ -282,7 +282,7 @@ func (t *Translator) translateMaxTokens(spec modelmanager.ModelSpec, text string
 	if base < 1024 {
 		base = 1024
 	}
-	srcTok := estimateTokens(text)
+	srcTok := EstimateTokens(text)
 	if ctx := t.ctxTokens(); ctx > 0 {
 		if room := ctx - srcTok - 896; room > base {
 			return max(base, min(2*srcTok+128, room))
@@ -298,11 +298,13 @@ func (t *Translator) ctxTokens() int {
 	return t.deps.CtxTokens()
 }
 
-// estimateTokens 粗预算用 token 估算，不是分词器。
+// EstimateTokens 粗预算用 token 估算，不是分词器。
 // 实测基准（M5 报告 §7.1）：中文小说 0.69–0.713 token/字，拉丁文 ≈0.25 token/字符。
 // 预算方向取保守高估：非 ASCII 一律 1 token/字符，ASCII 0.5 token/字符。
-// 只用于 max_tokens 预算；M5 步 1 的分块器按文体分档另行实现，不复用此处。
-func estimateTokens(text string) int {
+// 导出为包级函数：translateMaxTokens 的钳制与 docpipeline 分块器必须共用同一口径
+//（M5 报告 §11 对齐约定）——两处预算一旦漂移，分块器放行的块会在请求路径被截断。
+// M5 步 1 的分块器按文体分档另行细化，不复用此处系数，但 ceiling 推导同源。
+func EstimateTokens(text string) int {
 	ascii, wide := 0, 0
 	for _, r := range text {
 		if r < 0x80 {

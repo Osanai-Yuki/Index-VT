@@ -11,16 +11,16 @@ import (
 // ============================================================================
 
 func TestEstimateTokens(t *testing.T) {
-	if got := estimateTokens(""); got != 0 {
+	if got := EstimateTokens(""); got != 0 {
 		t.Fatalf("空文本: got %d want 0", got)
 	}
-	if got := estimateTokens("abcdefgh"); got != 4 {
+	if got := EstimateTokens("abcdefgh"); got != 4 {
 		t.Fatalf("8 ASCII: got %d want 4", got)
 	}
-	if got := estimateTokens("王妃沈三娘"); got != 5 {
+	if got := EstimateTokens("王妃沈三娘"); got != 5 {
 		t.Fatalf("5 CJK: got %d want 5", got)
 	}
-	if got := estimateTokens("abc王妃"); got != 3 { // 3÷2=1 + 2 = 3
+	if got := EstimateTokens("abc王妃"); got != 3 { // 3÷2=1 + 2 = 3
 		t.Fatalf("混合: got %d want 3", got)
 	}
 }
@@ -147,9 +147,22 @@ func TestBuildRequestNailongSamplingWired(t *testing.T) {
 	}
 }
 
+// M5 §11 对齐钉子：docpipeline.MaxChunkRunes(32768) = 16769（ceiling 公式同源）。
+// 该尺寸的满块在请求路径不得被 max_tokens 截断——若本测试失败，说明钳制常数被改动，
+// 必须同步重推 docpipeline/chunker.go 的 ceiling 公式与 TestMaxChunkRunesTable。
+func TestTranslateMaxTokensAccommodatesM5ChunkCeiling(t *testing.T) {
+	tr := NewTranslator(Deps{CtxTokens: func() int { return 32768 }}, nil)
+	ceiling := 16769 // docpipeline.MaxChunkRunes(32768)；用变量避免常量截断的编译期检查
+	chunk := strings.Repeat("字", ceiling)
+	_, maxTokens, _, _ := tr.buildRequest("translate", TranslateRequest{Text: chunk, TargetLang: "en"})
+	need := int(0.893 * float64(ceiling)) // §7.3 实测输出膨胀
+	if maxTokens < need {
+		t.Fatalf("满块会被截断：max_tokens %d < 输出需求 %d", maxTokens, need)
+	}
+}
+
 // Homura 官方公式不被本次改动影响。
-func TestBuildRequestHomuraUnchanged(t *testing.T) {
-	tr := NewTranslator(Deps{CtxTokens: func() int { return 8192 }}, nil)
+func TestBuildRequestHomuraUnchanged(t *testing.T) {	tr := NewTranslator(Deps{CtxTokens: func() int { return 8192 }}, nil)
 	_, maxTokens, temp, extra := tr.buildRequest("homura", TranslateRequest{
 		Text: "一句配音词", TargetLang: "en", Mode: ModeDubbing, Syllables: 8,
 	})
