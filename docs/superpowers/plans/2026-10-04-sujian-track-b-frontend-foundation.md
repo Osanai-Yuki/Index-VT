@@ -91,7 +91,7 @@
   - 动效：CSS 变量 `--dur-quick`(180ms) `--dur-standard`(320ms) `--dur-slow`(520ms) `--ease-signature`
   - TS：`type ThemeMode = 'light'|'dark'|'system'`、`type FontSize = 'small'|'standard'|'large'`、`applyTheme(mode)`、`applyFontSize(size)`、`watchSystemTheme(cb): () => void`、`storedTheme()`、`storedFontSize()`
 
-- [ ] **Step 1: 写 `theme/tokens.css`**
+- [x] **Step 1: 写 `theme/tokens.css`**
 
 按 `DESIGN.md` §2/§3/§4 的字面值抄写。三段结构，顺序不可颠倒：
 
@@ -118,7 +118,7 @@
 
 两条必须写进文件注释的要点：① `--font-app` 单一栈、CJK 在通用族之前（旧 bug 的根因）；② `@theme` 与 `@theme inline` 的分工理由（几何不需切主题、颜色需要）。
 
-- [ ] **Step 2: 写 `theme/base.css`**
+- [x] **Step 2: 写 `theme/base.css`**
 
 ```css
 /* reset / body（font-family: var(--font-app)）/ :focus-visible 焦点环 /
@@ -136,22 +136,22 @@
 }
 ```
 
-- [ ] **Step 3: vendoring 字体（网络实测可达）**
+- [x] **Step 3: vendoring 字体（网络实测可达）**
 
 从 `https://fonts.gstatic.com` 或 npm 包取 **latin 子集** woff2：Inter 400/500/600、JetBrains Mono 400/500，落到 `src/assets/fonts/`，写 `@font-face { font-display: swap; unicode-range: U+0000-00FF,… }`（只声明 latin 段，避免浏览器为 CJK 也去匹配 Inter）。合计目标 ≤150KB。
 
 **若实现时网络不可用**：退回系统拉丁栈（`--font-app` 里 `'Inter'` 之后已是 `'Segoe UI'`，天然降级），并在报告里记为偏离 + 在 `DESIGN.md` §3.1 补一行说明。**不得**改用外链 `<link>`。
 
-- [ ] **Step 4: 写 `theme/theme.ts`**
+- [x] **Step 4: 写 `theme/theme.ts`**
 
 `applyTheme` 写 `localStorage['indexvt.theme']` 并设 `<html data-theme>`；`watchSystemTheme` 监听 `matchMedia('(prefers-color-scheme: dark)')` 的 `change` 并返回取消函数；`applyFontSize` 只缩放 `--text-read`(15.5)/`--text-body`(13.5)/`--text-caption`(12) 三个变量（系数 0.92/1.0/1.1），**不动 `--text-micro`**（否则表格列宽随字号跳动）。
 
-- [ ] **Step 5: 接线 `main.tsx` 与 `index.html`（保留旧文件）**
+- [x] **Step 5: 接线 `main.tsx` 与 `index.html`（保留旧文件）**
 
 `main.tsx` 增加两行 import（`./theme/tokens.css`、`./theme/base.css`），**保留** `./styles/tokens.css`（203 处旧 utility 仍在用；Track C 才删）。
 `index.html` 加 `<meta name="color-scheme" content="light dark">` 与首帧前的内联主题脚本（读 `localStorage`，`system` 档查 `matchMedia`，设 `data-theme`），消除深色主题启动白闪。
 
-- [ ] **Step 6: 写 `scripts/verify-theme.mjs` 并跑通（这是本 Task 的验收，不是可选）**
+- [x] **Step 6: 写 `scripts/verify-theme.mjs` 并跑通（这是本 Task 的验收，不是可选）**
 
 用 Playwright 打开 dev server，断言：
 1. `getComputedStyle(document.documentElement).getPropertyValue('--canvas')` light 为 `#FBFBFA`、切 dark 后为 `#131312`
@@ -160,7 +160,7 @@
 4. `applyFontSize('large')` 后 `body` 的 `font-size` ≈ `14.85px`，而任一 `.text-micro` 元素仍为 `11px`
 5. 无 `fonts.googleapis`/`fonts.gstatic` 出现在任何产物里（grep `dist/`）
 
-- [ ] **Step 7: 三绿 + Commit**
+- [x] **Step 7: 三绿 + Commit**
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run build && node scripts/verify-theme.mjs
@@ -183,7 +183,7 @@ git commit -m "feat(theme): sujian semantic tokens with light/dark, vendored fon
   - `npm run verify:a11y -- <page> [widths] [themes]` —— axe 矩阵，输出 critical/serious 计数，非 0 即 exit 1
   - `frontend/scripts/design-lint-legacy.txt` —— 并存期白名单（Track C 逐行删除）
 
-- [ ] **Step 1: 写 lint 脚本（零依赖）**
+- [x] **Step 1: 写 lint 脚本（零依赖）**
 
 规则表（`DESIGN.md` §10）：
 
@@ -200,21 +200,21 @@ git commit -m "feat(theme): sujian semantic tokens with light/dark, vendored fon
 
 白名单机制：读 `design-lint-legacy.txt`（一行一个相对 `src/` 的路径），命中的文件整体跳过；`theme/tokens.css` 与 `theme/base.css` 恒定豁免（token 定义处必须有字面色值）。行尾 `// lint-allow: <rule-id>` 可豁免单行（虚拟化算出的 inline style 会需要），**豁免必须写理由**。
 
-- [ ] **Step 2: 生成初始白名单**
+- [x] **Step 2: 生成初始白名单**
 
 ```bash
 cd frontend && ls src/pages/*.tsx src/components/{Rail,StatusBar,ui}.tsx src/LangSelect.tsx src/App.tsx src/stores/appStore.ts src/wailsapi.ts src/styles/tokens.css > scripts/design-lint-legacy.txt
 ```
 文件头写三行注释：这是什么、为什么存在、Track C 每迁移一页删一行。
 
-- [ ] **Step 3: 证明 lint 有效（对旧代码必须报出大量命中）**
+- [x] **Step 3: 证明 lint 有效（对旧代码必须报出大量命中）**
 
 ```bash
 cd frontend && node scripts/lint-design-tokens.mjs --no-legacy
 ```
 Expected: **必须报出数十条命中**（DESIGN.md 记录的是约 60 处硬编码色 + 58 处任意值 + 6 处 `outline-none` + 8 处 alert/confirm + 2 处 emoji）。若为 0，说明 lint 本身失效，先修 lint 再继续。`--no-legacy` 是仅供本步自检的开关，正常构建不带它。
 
-- [ ] **Step 4: 接进构建 + 打开 B32**
+- [x] **Step 4: 接进构建 + 打开 B32**
 
 `package.json`:
 ```json
@@ -228,14 +228,14 @@ Expected: **必须报出数十条命中**（DESIGN.md 记录的是约 60 处硬�
 ```
 `tsconfig.json`：`"noUnusedLocals": true`、`"noUnusedParameters": true`。
 
-- [ ] **Step 5: 清掉 B32 暴露的死导入（不得为此关掉开关）**
+- [x] **Step 5: 清掉 B32 暴露的死导入（不得为此关掉开关）**
 
 ```bash
 cd frontend && npx tsc --noEmit
 ```
 已知至少两处：`ModelHub.tsx` 的 `Upload`、`MainTranslate.tsx` 的 `apiStarHistory`。逐个删除未使用导入/参数；**若某处未使用是因为功能没接完**（如 `apiStarHistory` 对应"收藏历史"这个 PRD S2 的 In-Scope 项），不要静默删——在该处留 `// TODO(TrackC): 收藏动作，见 PRD S2` 并保留导入会导致 tsc 失败，因此**改为删除导入 + 在计划外清单里记一条 Track C 必做项**，在报告里写明。
 
-- [ ] **Step 6: 写 `scripts/verify-a11y.mjs`**
+- [x] **Step 6: 写 `scripts/verify-a11y.mjs`**
 
 ```js
 // 用法: node scripts/verify-a11y.mjs <path> [widths=1180,1366,1680] [themes=light,dark]
@@ -245,7 +245,7 @@ cd frontend && npx tsc --noEmit
 ```
 用 `@axe-core/playwright` 的 `AxeBuilder`；`themes` 通过在页面 `evaluate` 里 `document.documentElement.setAttribute('data-theme', t)` + 同步写 localStorage 实现（复用 `theme/theme.ts` 的 `applyTheme`）。
 
-- [ ] **Step 7: 装 devDependencies 并跑通空靶**
+- [x] **Step 7: 装 devDependencies 并跑通空靶**
 
 ```bash
 cd frontend && npm i -D playwright @axe-core/playwright && npx playwright install chromium
@@ -253,7 +253,7 @@ node scripts/verify-a11y.mjs / 1366 light
 ```
 Expected: 能跑完并输出 axe 结果（当前页是旧 UI，**允许有 violation** —— 本步只验证 harness 本身可用，不要求旧页面干净）。若浏览器下载失败，报告为 BLOCKED 并说明（这是环境依赖，不得假装通过）。
 
-- [ ] **Step 8: 三绿 + Commit**
+- [x] **Step 8: 三绿 + Commit**
 
 ```bash
 cd frontend && npm run lint:design && npx tsc --noEmit && npm run build
@@ -277,7 +277,7 @@ git commit -m "build(frontend): design-token drift lint, a11y matrix harness, st
   - `EV` 常量表：`EV.DELTA='translate:delta'`、`EV.DONE='translate:done'`、`EV.ORCH='orch:event'`、`EV.MODEL_PROGRESS='model:progress'`、`EV.MODELS_UPDATED='models:updated'`、`EV.CUE='subtitle:cue'`
   - `type AppError = { kind: AppErrorKind; message: string; retryable: boolean; logHint?: string }`、`type AppErrorKind = 'not-ready'|'validation'|'io'|'network'|'model'|'canceled'|'timeout'|'unknown'`、`toAppError(e: unknown): AppError`、`isCancel(e: unknown): boolean`
 
-- [ ] **Step 1: 实现分发器（本 Task 的核心，必须按此结构）**
+- [x] **Step 1: 实现分发器（本 Task 的核心，必须按此结构）**
 
 ```ts
 // 每个事件名只向 Wails 注册一次；本地维护 handler 集合自行分发。
@@ -309,7 +309,7 @@ export function on(name: string, handler: (p: unknown) => void): () => void {
 ```
 `dispatch` 负责：无订阅者时按 `name` 暂存到 `pending`（超 `PENDING_MAX` 丢最旧、超 `PENDING_TTL` 清理），有订阅者时逐个 `safe()` 调用（单个 handler 抛错不得中断其余 handler，错误走 `console.error` + 可选 toast 钩子）。
 
-- [ ] **Step 2: 写 `scripts/verify-wails.mjs`（浏览器探针，前端无单测框架）**
+- [x] **Step 2: 写 `scripts/verify-wails.mjs`（浏览器探针，前端无单测框架）**
 
 在 dev server 页面上注入一个假的 `window.runtime`（`EventsOn` 存回调、`EventsEmit` 触发它、`EventsOff` 记录被摘的事件名），然后断言三件事：
 1. **多路分发**：A、B 两个 handler 订阅同名事件，emit 一次 → 两者都收到
@@ -317,12 +317,12 @@ export function on(name: string, handler: (p: unknown) => void): () => void {
 3. **早到缓冲**：先 emit（无订阅者）→ 再订阅 → 新 handler 立即收到缓冲的那条，且缓冲被清空（二次订阅不再收到）
 4. **异常隔离**：A 抛错，B 仍收到
 
-- [ ] **Step 3: 实现 `lib/errors.ts`**
+- [x] **Step 3: 实现 `lib/errors.ts`**
 
 `toAppError` 按消息特征分类（`装配超时`/`未就绪` → `not-ready`；`校验失败`/`不存在`/`不支持` → `validation`；`SHA256`/`下载`/`重命名` → `io` 或 `network`；`模型运行中`/`llama` → `model`；`已取消` → `canceled`；`首字` → `timeout`；其余 `unknown`），附 `retryable` 与 `logHint`（指向 `OpenLogsFolder`）。**分类字符串必须与 Track A 后端的真实错误文案对齐** —— 实现前 `grep -rn "fmt.Errorf\|errors.New" ../app/` 取真实文案，不要凭想象写匹配规则。
 `isCancel(e)` 只认 `kind === 'canceled'`（取消不是错误，spec §5 规则 1）。
 
-- [ ] **Step 4: 三绿 + 探针通过 + Commit**
+- [x] **Step 4: 三绿 + 探针通过 + Commit**
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run lint:design && npm run build && node scripts/verify-wails.mjs
@@ -343,15 +343,15 @@ git commit -m "feat(lib): single-subscription event fan-out with early-arrival b
   - `useVirtualRows(opts: { count: number; rowHeight: number; overscan?: number }): { range: { start: number; end: number }; padTop: number; padBottom: number; onScroll(e): void; containerRef }`
   - 负输入约定：`tcSrt(-1) === '00:00:00,000'`（钳到 0，与后端 LRC 负时间戳钳制一致）
 
-- [ ] **Step 1: 实现 `format.ts`**
+- [x] **Step 1: 实现 `format.ts`**
 
 全部纯函数、无副作用、无 `Date` 依赖（除 `fmtCountdown` 也不需要）。数字一律走 `Math.max(0, …)` 钳制；`fmtBytes` 用 1024 进制并保留 1 位小数；`fmtPct(0,0)` 返回 `'0%'`（不得 `NaN`）。
 
-- [ ] **Step 2: 实现 `virtualizer.ts`**
+- [x] **Step 2: 实现 `virtualizer.ts`**
 
 约 40 行的窗口化 hook：给定 `count`、`rowHeight`、容器 `scrollTop`/`clientHeight`，返回可视区间 `[start, end)` 加上下各 `overscan`（默认 6，`DESIGN.md` §5.7）行，以及上下 padding 高度（用 padding 撑高而非渲染占位行）。**行高必须固定**（cue 表 32px / 历史 40px），变高行不支持——在注释里写明这个限制，不要假装支持。
 
-- [ ] **Step 3: 写 `scripts/verify-lib.mjs`（node 直接跑，无需浏览器）**
+- [x] **Step 3: 写 `scripts/verify-lib.mjs`（node 直接跑，无需浏览器）**
 
 ```js
 // 用 tsx/esbuild 都不引入 —— 直接把两个文件的关键函数用 node 的内联断言覆盖：
@@ -362,7 +362,7 @@ git commit -m "feat(lib): single-subscription event fan-out with early-arrival b
 ```
 若纯 node 无法直接 import `.ts`，改为把这些断言写成 Playwright 页面里的 `evaluate`（与 2.3 同一套路），**不要为此新增测试框架依赖**。
 
-- [ ] **Step 4: 注册脚本 + 三绿 + Commit**
+- [x] **Step 4: 注册脚本 + 三绿 + Commit**
 
 `package.json` 的 `scripts` 追加 `"verify:lib": "node scripts/verify-lib.mjs"`（2.2 只注册了 theme/a11y/wails，本 Task 新增的这个必须一并注册，否则 2.10 的 `verify:all` 会引用到不存在的脚本）。
 
@@ -402,11 +402,11 @@ interface CheckboxProps { checked: boolean; onChange: (v: boolean) => void; labe
 interface KbdProps { keys: string[] }
 ```
 
-- [ ] **Step 1: 建 `_Primitives.tsx` 陈列页骨架**
+- [x] **Step 1: 建 `_Primitives.tsx` 陈列页骨架**
 
 一个 dev-only 路由（`/?primitives` 查询参数判定，**不进导航**），按原语分节渲染**全部变体与全部状态**（default/hover 无法静态化则跳过、focus 用 `:focus-visible` 自然呈现、disabled、loading、error）。每节一个 `<section aria-labelledby>` + 标题。它是 axe 的靶子，也是目视核对的唯一入口。文件头注释写明「交付前删除」。
 
-- [ ] **Step 2: 实现 8 个原语**
+- [x] **Step 2: 实现 8 个原语**
 
 规格全部取自 `DESIGN.md` §5.1–5.4、§5.12（高度/padding/radius/变体/状态/a11y 角色）。要点：
 - `Segmented` 的 `onChange` 是**必填 prop**（类型层面杜绝死控件）；`role="radiogroup"` + 每项 `role="radio" aria-checked`；← → 移动、Home/End 跳首尾。
@@ -415,7 +415,7 @@ interface KbdProps { keys: string[] }
 - `IconButton` 的 `label` 同时用于 `aria-label` 与 Tooltip 文案（Tooltip 在 2.7 实现，此处先渲染 `title` 属性，2.7 换成组件并在报告里记一条待替换）。
 - 焦点环一律继承 `base.css` 的 `:focus-visible`，组件内**不得**写 `outline-none`。
 
-- [ ] **Step 3: 验收**
+- [x] **Step 3: 验收**
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run lint:design && npm run build
@@ -424,7 +424,7 @@ node scripts/verify-a11y.mjs "/?primitives" 1180,1366,1680 light,dark
 ```
 Expected: axe **0 critical、0 serious**（六组全过）。任何 violation 必须修到 0 才算完成 —— 这是 `DESIGN.md` §7 第 8 条的硬门槛，不接受"moderate 先放着"。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/components/ui frontend/src/pages/_Primitives.tsx
@@ -459,11 +459,11 @@ interface SkeletonProps { className?: string; rows?: number }
 interface ProgressProps { pct: number; tone?: 'accent' | 'ok' | 'warn'; label: string }  // label 必填（aria）
 ```
 
-- [ ] **Step 1–3:** 按 `DESIGN.md` §5.5 / §5.8 / §5.10 / §5.11 实现；`Progress` 用 `transform: scaleX()` 而非 `width`（motion-plan 的 GPU 友好要求），`role="progressbar"` + `aria-valuenow/min/max`；`Skeleton` 用 `opacity` 循环**不用位移**；`EmptyState` **不带点阵网格背景**（v1.0 签名细节已废弃）。
+- [x] **Step 1–3:** 按 `DESIGN.md` §5.5 / §5.8 / §5.10 / §5.11 实现；`Progress` 用 `transform: scaleX()` 而非 `width`（motion-plan 的 GPU 友好要求），`role="progressbar"` + `aria-valuenow/min/max`；`Skeleton` 用 `opacity` 循环**不用位移**；`EmptyState` **不带点阵网格背景**（v1.0 签名细节已废弃）。
 - 表单错误：`aria-invalid` + `aria-describedby` 指向错误文案 id，错误文案 12px `text-danger` 带图标。
 - `Textarea` 的 `read` 模式必须让文本块 `max-width: 72ch` 且居中（`DESIGN.md` §3.5 —— 大面积留白靠限宽产生）。
 
-- [ ] **Step 4: 验收 + Commit**
+- [x] **Step 4: 验收 + Commit**
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run lint:design && npm run build
@@ -491,11 +491,11 @@ interface Lang { code: string; zhName: string; enName: string; script?: string; 
 interface TooltipProps { content: React.ReactNode; children: React.ReactElement }
 ```
 
-- [ ] **Step 1: `useDismissable`** —— 统一的「点外部关闭 + Esc 关闭最上层 + 焦点回到触发元素」hook，供 Popover/Drawer/Modal/Tooltip 共用。**Esc 必须只关最上层**（维护一个模块级栈）。
-- [ ] **Step 2: `LangPicker`** —— 触发器 + Popover + 搜索 Field + `role="listbox"` 虚拟列表（150 项，用 2.4 的 virtualizer）。键盘：Enter/Space 开、↑↓ 移动、Enter 选、Esc 关、输入即过滤、首字母跳转。`detected` 存在时副行显示 `DETECTED · <语言名>`（**必须消费后端 `translate:done` 的 `detected`**，Track A 已确认后端返回该字段；现状前端硬编码 `'…'`）。
-- [ ] **Step 3: `Tooltip`** —— 延迟 400ms 出现、120ms 淡出（motion-plan quick 档）、`role="tooltip"` + `aria-describedby`；键盘聚焦也能触发（不能只 hover）。
+- [x] **Step 1: `useDismissable`** —— 统一的「点外部关闭 + Esc 关闭最上层 + 焦点回到触发元素」hook，供 Popover/Drawer/Modal/Tooltip 共用。**Esc 必须只关最上层**（维护一个模块级栈）。
+- [x] **Step 2: `LangPicker`** —— 触发器 + Popover + 搜索 Field + `role="listbox"` 虚拟列表（150 项，用 2.4 的 virtualizer）。键盘：Enter/Space 开、↑↓ 移动、Enter 选、Esc 关、输入即过滤、首字母跳转。`detected` 存在时副行显示 `DETECTED · <语言名>`（**必须消费后端 `translate:done` 的 `detected`**，Track A 已确认后端返回该字段；现状前端硬编码 `'…'`）。
+- [x] **Step 3: `Tooltip`** —— 延迟 400ms 出现、120ms 淡出（motion-plan quick 档）、`role="tooltip"` + `aria-describedby`；键盘聚焦也能触发（不能只 hover）。
 
-- [ ] **Step 4: 验收 + Commit**
+- [x] **Step 4: 验收 + Commit**
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run lint:design && npm run build
@@ -523,12 +523,12 @@ interface ToastItem { id: string; tone: ToastTone; message: string; action?: { l
 // toastStore: push(t: Omit<ToastItem,'id'>): string; dismiss(id): void; 列表上限 3
 ```
 
-- [ ] **Step 1: 焦点陷入（focus trap）** —— Tab 在浮层内循环，Shift+Tab 反向；打开时焦点移到 `initialFocus` 指定元素；关闭时**焦点回到触发元素**（`useDismissable` 已提供栈，这里补 trap）。
-- [ ] **Step 2: `Modal`** —— `role="dialog" aria-modal="true" aria-labelledby`；scrim 点击关闭（破坏性确认可用 `dismissible={false}` 关掉）；入场 `translateY(8px)+opacity` 320ms，**不用 scale**。
-- [ ] **Step 3: `Toast` + `ToastHost`** —— 右下堆叠，最多 3 条，超出替换最旧；`error` 类**不自动消失**且带关闭按钮；其余 4s 自动消失、hover 暂停计时；新条目进入时已有条目以 `transform` 上移让位（不动 height）。
-- [ ] **Step 4: 破坏性确认的默认焦点** —— `initialFocus` 默认 `'cancel'`，防止回车误删（PRD S4 的 GWT 明确要求）。
+- [x] **Step 1: 焦点陷入（focus trap）** —— Tab 在浮层内循环，Shift+Tab 反向；打开时焦点移到 `initialFocus` 指定元素；关闭时**焦点回到触发元素**（`useDismissable` 已提供栈，这里补 trap）。
+- [x] **Step 2: `Modal`** —— `role="dialog" aria-modal="true" aria-labelledby`；scrim 点击关闭（破坏性确认可用 `dismissible={false}` 关掉）；入场 `translateY(8px)+opacity` 320ms，**不用 scale**。
+- [x] **Step 3: `Toast` + `ToastHost`** —— 右下堆叠，最多 3 条，超出替换最旧；`error` 类**不自动消失**且带关闭按钮；其余 4s 自动消失、hover 暂停计时；新条目进入时已有条目以 `transform` 上移让位（不动 height）。
+- [x] **Step 4: 破坏性确认的默认焦点** —— `initialFocus` 默认 `'cancel'`，防止回车误删（PRD S4 的 GWT 明确要求）。
 
-- [ ] **Step 5: 验收 + Commit**
+- [x] **Step 5: 验收 + Commit**
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run lint:design && npm run build
@@ -562,13 +562,13 @@ interface DataTableProps<T> {
 }
 ```
 
-- [ ] **Step 1:** 按 `DESIGN.md` §5.7 实现：sticky 表头 28px（`text-micro` + `text-ink3` + uppercase + `.08em`）、行 32/40、`1px --line` 行分隔、hover `bg-sunken`、选中 = 左缘 `2px --accent` + `bg-accentSoft`。
-- [ ] **Step 2:** 虚拟化接 2.4 的 `useVirtualRows`（上下各 6 行缓冲）；用 padding 撑高，不渲染占位行。
-- [ ] **Step 3:** 批量选择：首列 16px `Checkbox`（`role="checkbox"`，含 indeterminate）、Shift 连选、表头全选；选中数由调用方读 `selected.size` 显示在工具栏（喂给「重试选中项」→ 后端 `SubRetryCues`，Track A 已绑定）。
-- [ ] **Step 4:** 行内操作按钮：hover/focus 时用 `opacity` 显现（**不用 `display:none`**，否则脱离 Tab 序）；始终在 Tab 序内。
-- [ ] **Step 5:** 键盘：↑↓ 移动选中行、Space 切换勾选、Enter 触发 `onRowClick`。
+- [x] **Step 1:** 按 `DESIGN.md` §5.7 实现：sticky 表头 28px（`text-micro` + `text-ink3` + uppercase + `.08em`）、行 32/40、`1px --line` 行分隔、hover `bg-sunken`、选中 = 左缘 `2px --accent` + `bg-accentSoft`。
+- [x] **Step 2:** 虚拟化接 2.4 的 `useVirtualRows`（上下各 6 行缓冲）；用 padding 撑高，不渲染占位行。
+- [x] **Step 3:** 批量选择：首列 16px `Checkbox`（`role="checkbox"`，含 indeterminate）、Shift 连选、表头全选；选中数由调用方读 `selected.size` 显示在工具栏（喂给「重试选中项」→ 后端 `SubRetryCues`，Track A 已绑定）。
+- [x] **Step 4:** 行内操作按钮：hover/focus 时用 `opacity` 显现（**不用 `display:none`**，否则脱离 Tab 序）；始终在 Tab 序内。
+- [x] **Step 5:** 键盘：↑↓ 移动选中行、Space 切换勾选、Enter 触发 `onRowClick`。
 
-- [ ] **Step 6: 验收（含性能）+ Commit**
+- [x] **Step 6: 验收（含性能）+ Commit**
 
 ```bash
 cd frontend && npx tsc --noEmit && npm run lint:design && npm run build
@@ -589,15 +589,15 @@ git commit -m "feat(ui): virtualized DataTable with batch selection and keyboard
 - Modify: `frontend/package.json`（补 `verify:all`）、`docs/03-GUI设计图/DESIGN.md`（若验收中发现规格与实现必须偏离，在此记录）
 - Create: `frontend/scripts/verify-contrast.mjs`、`frontend/scripts/verify-keyboard.mjs`
 
-- [ ] **Step 1: 对比度实测（不靠 DESIGN.md 的算式，靠真实渲染）**
+- [x] **Step 1: 对比度实测（不靠 DESIGN.md 的算式，靠真实渲染）**
 
 `verify-contrast.mjs`：遍历陈列页所有文本节点，取其 `color` 与**实际背景**（向上找第一个非 transparent 的 `background-color`），按 WCAG 相对亮度算对比度，断言全部 ≥4.5:1（`text-micro` 不豁免）。light/dark 各跑一遍。输出最低三档的实测值。
 
-- [ ] **Step 2: 键盘流程实测**
+- [x] **Step 2: 键盘流程实测**
 
 `verify-keyboard.mjs`：在陈列页上仅用键盘（`page.keyboard`）完成「Tab 遍历全部原语 → 每个都有可见焦点环 → Segmented 用方向键改值 → Switch 用 Space 切换 → Modal 打开后 Tab 被困在内部 → Esc 关闭后焦点回到触发按钮」，逐步断言。任何一步失败即 exit 1。
 
-- [ ] **Step 3: 定义 `verify:all` 并全矩阵跑一遍**
+- [x] **Step 3: 定义 `verify:all` 并全矩阵跑一遍**
 
 `package.json` 追加（一条命令跑完地基的全部验证门禁，Track C 每次改动后都应能复跑）：
 
@@ -611,15 +611,15 @@ npm run verify:all
 ```
 Expected: 全绿；axe 六组 0 critical/0 serious；对比度最低值 ≥4.5。**注意 `verify:all` 不含 `build`**（`build` 本身已含 lint+tsc+vite），避免重复。
 
-- [ ] **Step 4: reduced-motion 实测**
+- [x] **Step 4: reduced-motion 实测**
 
 `page.emulateMedia({ reducedMotion: 'reduce' })` 后断言：陈列页内无任何元素的 `animation-duration` > 1ms（spinner 除外，应为 1600ms）、无 `transform` 位移入场、`.caret` 不闪。
 
-- [ ] **Step 5: 交接清单（写进报告，供 Track C）**
+- [x] **Step 5: 交接清单（写进报告，供 Track C）**
 
 必须逐条列出：① 23 个原语的导入路径与 props 摘要；② `_Primitives.tsx` 的删除条件（Track C 全部页面迁移完成后）；③ `design-lint-legacy.txt` 当前行数与"每迁移一页删一行"的规则；④ Track A 交接项的落点（R17 的 error 态渲染在哪个页面、`SubGetDoc`/`CueProgress.Translated` 由哪个 store 消费）；⑤ 尚未接线的后端能力清单（术语 CRUD、配音模式字段、约束字段真实性需先核 `translator.Constraints`）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/scripts frontend/package.json

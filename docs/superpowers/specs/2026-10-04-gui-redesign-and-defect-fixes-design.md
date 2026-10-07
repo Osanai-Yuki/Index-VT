@@ -312,12 +312,23 @@ Playwright 只能验 web 层。以下必须在真实 `Index-VT.exe` 上手工验
 
 ---
 
-## 10. 未决问题（实施前需回答）
+## 10. 未决问题（2026-10-05 已全部有结论）
+
+> 本节原为实施前待答问题。Track A/B 执行后逐条核过代码，结论附在每条后面；
+> 未接线到 UI 的部分留给 Track C，已在交接文档登记。
 
 1. **axe-core 引入方式**：`@axe-core/playwright`（devDependency）还是 Playwright 注入单文件（零依赖）？见 §8.2。
-2. **`QueueOptions.GlossaryID` 后端是否真的消费**：`engine.go:88` 注释标「M3 启用术语」，但 `queue.go:119` 调 `e.translate(ctx, clean, "auto", opt.TargetLang)` **没有传术语**。若不消费，字幕页的术语选择器本版不上（不做死控件）。→ 需读 `engine.go` 的 `TranslateCueFn` 签名确认；很可能需要扩展该回调才能支持。
+   → 取 `@axe-core/playwright`，已在 `frontend/package.json` devDependencies；矩阵由 `scripts/verify-a11y.mjs` 消费。
+2. **`QueueOptions.GlossaryID` 后端是否真的消费**：`engine.go:88` 注释标「M3 启用术语」，但 `queue.go:119` 调 `e.translate(ctx, clean, "auto", opt.TargetLang)` **没有传术语**。若不消费，字幕页的术语选择器本版不上（不做死控件）。
+   → 确认不消费（现 `queue.go:144` 仍只传 lang 不传术语）。字幕页术语选择器本版不上，符合预判；主翻译台的 `GlossaryID` 走 `app.go:359` 的真实查表路径，不受影响。
 3. **约束抽屉的字段真实性**：mockup 里的 4 硬约束 + 5 软预设必须逐个对照 `translator.Constraints` 的真实字段，后端不消费的**不渲染**。
+   → 真实字段只有 `Glossary / Hard / Soft / Genre / JSONPreserve` 五个（`translator/prompt_translate.go:21-28`）。抽屉 UI 未重做，Track C 按这五个字段渲染，多余的预设不渲染。
 4. **拖拽导入**：Wails v2 `DragAndDrop` 是否与 WebView2 文本拖选冲突（PRD R-8）。
+   → 未实施：前端零 `onDrop/dataTransfer`，`wails.json` 无 `DragAndDrop` 配置，导入一律走原生文件对话框。冲突问题因此尚未遇到，等 Track C 真要做拖拽时再验。
 5. **`CollectLogs` 脱敏**（B31/R-6）：`logs/llama-server.out.log` 实际是否含提示词原文？需真实运行一次后检查。
+   → 已按保守默认落地（`app/logs.go:15-24` 排除表 + `logs_test.go` 锁定）。2026-10-05 补了实测：本机仅存的样本 25 行，内容只有启动信息、`verbosity = 3` 参数回显、模型绝对路径与 `127.0.0.1:8101` 监听地址，`grep "请将以下"` 零命中——即该次运行未记录提示词正文。但这份样本里模型路径指向 `E:\Code_Projects\Python_Dev\Index-VT_GUI`（旧目录），不能当作当前 exe 的证据；且日志是否含正文取决于 llama-server 的 `-lv` 级别，级别提高后的行为未实测。所以排除表仍是正确默认，`code` 注释里"事实核验尚未执行"那句可以更新为上述结论。
+   → 顺带一条实测发现：该日志会写入模型**绝对路径**（含用户名目录）。打包虽已排除它，用户自行分享时仍会暴露本机目录结构。
 6. **模型校验失败时的「我知道风险」出口**：是否需要（PRD R-7）。倾向需要，但要输入模型名以防误点。
+   → 未实施，也不建议按原倾向实施：完整性校验现为 fail-closed（`modelmanager/download.go:498-508`，拿不到官方 SHA256SUMS 直接拒绝安装并保留 `.part` 供重试）。加绕过出口等于把"不装未校验模型"的承诺换成一个可点的按钮。真要做，前提是产品层面先改口径。
 7. **旧文件处置**：`docs/03-GUI设计图/mockups.html` 与 `设计系统规范.md` 已加 SUPERSEDED 横幅并保留。**不删除**（属用户既有资产）；若需归档到 `docs/_archive/`，需用户明确同意。
+   → 2026-10-05 用户同意后归档到 `docs/03-GUI设计图/legacy/`（`git mv`，历史可追）。实测修正一项记录偏差：`设计系统规范.md` 确有 SUPERSEDED 横幅，`mockups.html` 原本**没有**任何作废标记，归档时补了页内横幅与 `[已作废]` 标题。引用路径已在 DESIGN.md / README / docs 01·04 同步。

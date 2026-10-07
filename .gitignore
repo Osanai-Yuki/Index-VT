@@ -26,3 +26,9 @@ logs/
 
 # SDD 工作区（git-ignored scratch）
 .superpowers/
+
+# Spike 产物：语料 + 模型原始输出 + 一次性探针脚本（~921 KB，可重跑再生）。
+# 与 docs/superpowers/{specs,plans} 的区别：那两处是长期规格，入库；这里是生成物，只留在本机。
+# 因此 docs/01 §3.2 与 m5-longdoc 可行性文档里对该目录的引用在干净克隆中会落空，
+# 引用处已就地标注「不入库」。
+docs/superpowers/spikes/
