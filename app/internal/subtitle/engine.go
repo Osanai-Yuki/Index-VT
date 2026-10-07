@@ -77,6 +77,9 @@ type SubtitleDoc struct {
 	// 序列化侧只读，不得就地修改（1.17 快照与并发读共享）。
 	StylesSection string `json:"-"`
 	StylesFormat  string `json:"-"`
+	// QueueActive 该文档是否有进行中的翻译队列。不入库；只在 GetDoc 快照时按
+	// queueCancel 表计算——前端据此禁用暂停/继续/取消，而不是点了才弹「无进行中队列」。
+	QueueActive bool `json:"queueActive,omitempty"`
 }
 
 // BilingualMode 双语模式（01 文档 §5.4 三模式）。
@@ -98,9 +101,13 @@ type ExportOptions struct {
 
 // QueueOptions 队列选项。
 type QueueOptions struct {
-	TargetLang  string `json:"targetLang"`
-	GlossaryID  int64  `json:"glossaryId,omitempty"` // M3 启用术语
+	TargetLang  string        `json:"targetLang"`
+	GlossaryID  int64         `json:"glossaryId,omitempty"` // M3 启用术语
 	Bilingual   BilingualMode `json:"bilingual"`
+	// Full 整卷重翻：done/failed 一并重跑——目标语言选错后「全部翻译」必须覆盖全片，
+	// 否则已翻条目保留旧语言译文。仅 SubTranslate 入口传真；RetryFailed/RetryCues
+	// 内部强制清零（重试语义只覆盖各自目标集）。
+	Full bool `json:"full,omitempty"`
 }
 
 // CueProgress 队列进度事件（100ms 合并后推送）。
@@ -211,7 +218,9 @@ func (e *Engine) GetDoc(id string) (*SubtitleDoc, error) {
 		return nil, fmt.Errorf("文档 %s 不存在", id)
 	}
 	e.touchLocked(id)
-	return e.snapshotLocked(d), nil
+	out := e.snapshotLocked(d)
+	_, out.QueueActive = e.queueCancel[id]
+	return out, nil
 }
 
 // snapshotLocked 在持有 e.mu 时返回与后续队列写入隔离的文档副本。

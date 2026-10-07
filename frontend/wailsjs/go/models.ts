@@ -590,6 +590,7 @@ export namespace subtitle {
 	    targetLang: string;
 	    glossaryId?: number;
 	    bilingual: string;
+	    full?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new QueueOptions(source);
@@ -600,6 +601,7 @@ export namespace subtitle {
 	        this.targetLang = source["targetLang"];
 	        this.glossaryId = source["glossaryId"];
 	        this.bilingual = source["bilingual"];
+	        this.full = source["full"];
 	    }
 	}
 	export class StyleDef {
@@ -623,6 +625,7 @@ export namespace subtitle {
 	    encoding: string;
 	    cues: Cue[];
 	    styles?: StyleDef[];
+	    queueActive?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SubtitleDoc(source);
@@ -636,6 +639,7 @@ export namespace subtitle {
 	        this.encoding = source["encoding"];
 	        this.cues = this.convertValues(source["cues"], Cue);
 	        this.styles = this.convertValues(source["styles"], StyleDef);
+	        this.queueActive = source["queueActive"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

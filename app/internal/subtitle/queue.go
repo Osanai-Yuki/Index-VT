@@ -34,6 +34,17 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 		e.mu.Unlock()
 		return fmt.Errorf("翻译服务不可用")
 	}
+	// Full（整卷重翻，来自「全部翻译」按钮）：done/failed 一并重置为 pending——
+	// 目标语言选错后重翻必须覆盖已翻过的条目，否则同一文档混着两轮语言的译文。
+	// skipped 保留不动：空行跳过与语言无关。重试路径（RetryFailed/RetryCues）
+	// 防御性清掉 Full，它们只重跑自己的目标集。
+	if opt.Full {
+		for i := range doc.Cues {
+			if doc.Cues[i].State == CueDone || doc.Cues[i].State == CueFailed {
+				doc.Cues[i].State = CuePending
+			}
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	ctl := &queueCtl{
 		cancel: cancel,
@@ -265,6 +276,7 @@ func (e *Engine) RetryFailed(docID string, opt QueueOptions, onProgress func(Cue
 	if n == 0 {
 		return fmt.Errorf("没有失败条目")
 	}
+	opt.Full = false // 重试语义只覆盖 failed 子集，不接受调用方误传整卷重翻
 	return e.TranslateQueue(docID, opt, onProgress)
 }
 
@@ -286,5 +298,6 @@ func (e *Engine) RetryCues(docID string, cueIdx []int, opt QueueOptions, onProgr
 		}
 	}
 	e.mu.Unlock()
+	opt.Full = false // 同 RetryFailed：指定条目重译不接受 Full
 	return e.TranslateQueue(docID, opt, onProgress)
 }

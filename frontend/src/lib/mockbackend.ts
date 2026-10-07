@@ -203,6 +203,7 @@ const subtitleDoc = () => ({
   format: 'srt',
   encoding: 'utf-8',
   cues: cues(),
+  queueActive: false, // mock 无真实队列；暂停/继续/取消随之禁用，与空跑行为一致
 })
 
 /* ── 事件三件套 ─────────────────────────────────────────────── */
@@ -227,7 +228,7 @@ const runtime = {
 }
 
 let warnCount = 0
-function emitTranslateDemo(taskId: string) {
+function emitTranslateDemo(taskId: string, syl: { target: number; actual: number } | null) {
   const text = OUT[0]
   const step = Math.ceil(text.length / 12)
   let at = 0
@@ -242,6 +243,9 @@ function emitTranslateDemo(taskId: string) {
         tokPerSec: 32.4,
         firstTokenMs: 412,
         offTarget: false,
+        // 配音模式（F-07）：确定性偏差 +1，dev 假后端下「目标 N / 实测 M」胶囊可断言
+        targetSyllables: syl?.target,
+        actualSyllables: syl?.actual,
       })
     }
   }, 90)
@@ -308,9 +312,11 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
     probedAt: Date.now(),
   }),
   Translate: (req: never) => {
+    const r = req as unknown as { dubbing?: boolean; syllables?: number }
     const taskId = 'mock-task-1'
-    void req
-    setTimeout(() => emitTranslateDemo(taskId), 120)
+    // dubbing → 回配音音节（确定性偏差 +1）；普通模式回 null，done 事件不带音节字段
+    const syl = r.dubbing ? { target: r.syllables ?? 7, actual: (r.syllables ?? 7) + 1 } : null
+    setTimeout(() => emitTranslateDemo(taskId, syl), 120)
     return { taskId }
   },
   CancelTask: () => undefined,
