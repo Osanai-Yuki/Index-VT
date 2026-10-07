@@ -233,6 +233,9 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 		ModelName: func(modelID string) string {
 			return "index-" + modelID + "-2b"
 		},
+		CtxTokens: func() int {
+			return int(a.cfgSnapshot().EffectiveCtxTokens())
+		},
 		Log: log,
 	}, log)
 

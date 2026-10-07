@@ -16,6 +16,8 @@ import (
 
 	"indexvt/internal/paths"
 	"indexvt/internal/winproc"
+
+	"golang.org/x/sys/windows"
 )
 
 type GPU struct {
@@ -45,11 +47,12 @@ type EnvInfo struct {
 	ProbedAt        int64               `json:"probedAt"`
 }
 
-// runWithTimeout 用 LookPath 解析出的绝对路径执行，并施加超时。
-// 直接用命令名会按 PATH 且含当前工作目录解析（可被同名 DLL/EXE 劫持），
+// runWithTimeout 从固定系统目录解析出的绝对路径执行，并施加超时。
+// 刻意不经 exec.LookPath：PATH 是进程环境数据，用户可写目录里的同名可执行
+// 文件能遮蔽系统程序（命令注入防线不允许建立在环境变量上，CWE-78）；
 // 且无超时时一个挂住的 nvidia-smi 会把调用它的 Wails 绑定永久阻塞（B25）。
 func runWithTimeout(timeout time.Duration, name string, args ...string) ([]byte, error) {
-	bin, err := exec.LookPath(name)
+	bin, err := resolveSystemBinary(name)
 	if err != nil {
 		return nil, fmt.Errorf("找不到可执行文件 %s: %w", name, err)
 	}
@@ -63,6 +66,39 @@ func runWithTimeout(timeout time.Duration, name string, args ...string) ([]byte,
 		return nil, fmt.Errorf("%s 执行超时（%s）", name, timeout)
 	}
 	return out, err
+}
+
+// systemDir 返回 System32 绝对路径。经 Win32 API（KnownFolderPath）获取而非
+// 读环境变量；API 失败时退回绝大多数安装采用的默认布局。
+func systemDir() string {
+	if dir, err := windows.KnownFolderPath(windows.FOLDERID_System, windows.KF_FLAG_DEFAULT); err == nil && dir != "" {
+		return dir
+	}
+	return `C:\Windows\System32`
+}
+
+// resolveSystemBinary 在固定系统目录中探测二进制，不经 PATH 解析。
+// reg.exe 恒在 System32；nvidia-smi.exe 由驱动安装器放入 System32（现行布局），
+// 旧版驱动在 %ProgramFiles%\NVIDIA Corporation\NVSMI。两处皆无 → 返回错误，
+// 与原 LookPath 失败分支行为等价（GPU 探测退回 CPU 档提示，进程不受影响）。
+// 代价：只装在自定义 PATH 目录里的 nvidia-smi 不再被识别——按固定探测点取舍，
+// 不为个别布局保留环境变量污点源。
+func resolveSystemBinary(name string) (string, error) {
+	if !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		name += ".exe"
+	}
+	cands := []string{filepath.Join(systemDir(), name)}
+	if strings.EqualFold(name, "nvidia-smi.exe") {
+		if pf, err := windows.KnownFolderPath(windows.FOLDERID_ProgramFiles, windows.KF_FLAG_DEFAULT); err == nil && pf != "" {
+			cands = append(cands, filepath.Join(pf, "NVIDIA Corporation", "NVSMI", name))
+		}
+	}
+	for _, c := range cands {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c, nil
+		}
+	}
+	return "", fmt.Errorf("不在固定系统目录中（探测过 %s）", strings.Join(cands, "; "))
 }
 
 // QueryVRAM 读取 nvidia-smi 当前显存数据（用于启动降档与状态栏）。

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"indexvt/internal/modelmanager"
 )
 
 // ModeKind 翻译模式（ADR-004：Normal→Translate-2B，Dubbing→Homura-2B）。
@@ -69,6 +71,11 @@ type Deps struct {
 	ModelForMode func(mode ModeKind) string
 	// ModelName 推理请求 model 字段值。
 	ModelName func(modelID string) string
+	// CtxTokens 生效上下文长度（llama-server -c，来自设置页 ctx 档位）；0 = 未知。
+	// max_tokens 预算用它钳制：本服务端构建对 prompt+max_tokens 超限返回
+	// HTTP 400（M5 报告 §7.6 实测 exceed_context_size_error），过大的 max_tokens
+	// 会把今天能跑的请求弄挂，未知时回落注册表基值不放大。
+	CtxTokens func() int
 	Log       *slog.Logger
 }
 
@@ -123,7 +130,7 @@ func (t *Translator) Translate(ctx context.Context, req TranslateRequest, onDelt
 		cancel()
 	}()
 
-	prompt, maxTokens, temperature, extra := t.buildRequest(req)
+	prompt, maxTokens, temperature, extra := t.buildRequest(modelID, req)
 	httpReq := ChatRequest{
 		Model:       t.deps.ModelName(modelID),
 		Messages:    []ChatMessage{{Role: "user", Content: prompt}},
@@ -198,7 +205,7 @@ func (t *Translator) TranslateSync(ctx context.Context, req TranslateRequest) (s
 	if t.deps.OnTaskFinish != nil {
 		defer t.deps.OnTaskFinish(modelID)
 	}
-	prompt, maxTokens, temperature, extra := t.buildRequest(req)
+	prompt, maxTokens, temperature, extra := t.buildRequest(modelID, req)
 	httpReq := ChatRequest{
 		Model:       t.deps.ModelName(modelID),
 		Messages:    []ChatMessage{{Role: "user", Content: prompt}},
@@ -233,17 +240,78 @@ func applyExtra(r *ChatRequest, e requestExtra) {
 }
 
 // buildRequest prompt + 采样参数（01 文档 §4.5 参数映射表）。
-func (t *Translator) buildRequest(req TranslateRequest) (prompt string, maxTokens int, temperature float64, extra requestExtra) {
+//
+// 采样额外项（stop_token_ids/top_k/top_p/seed）按 modelID 从冻结注册表合并：
+// Translate-2B/Homura 的档案全零，合并后与历史行为逐字节一致；Nailong 的官方
+// 参数（§7.9 实测本构建接受并正常收尾）由此真正进入请求——此前 sse.go 的发送
+// 管道与 registry 的存储各自就位，但中间没有任何生产代码接线。
+func (t *Translator) buildRequest(modelID string, req TranslateRequest) (prompt string, maxTokens int, temperature float64, extra requestExtra) {
+	spec, _ := modelmanager.SpecByID(modelmanager.ModelID(modelID))
 	switch req.Mode {
 	case ModeDubbing:
 		// Homura：temp 0.3，max_tokens = max(512, 3×字符数)（官方）
 		prompt = BuildHomuraPrompt(req.Text, req.TargetLang, req.Syllables, req.constraints().Glossary)
-		return prompt, HomuraMaxTokens(req.Text), 0.3, requestExtra{}
+		return prompt, HomuraMaxTokens(req.Text), 0.3, extraFromSpec(spec)
 	default:
 		c := req.constraints()
 		prompt = BuildTranslatePrompt(req.Text, req.SourceLang, req.TargetLang, c)
-		return prompt, 1024, 0.0, requestExtra{} // Translate：greedy，1024 默认
+		return prompt, t.translateMaxTokens(spec, req.Text), 0.0, extraFromSpec(spec)
 	}
+}
+
+// extraFromSpec 注册表采样档案 → 请求额外项（零值字段经 omitempty 不发送）。
+func extraFromSpec(spec modelmanager.ModelSpec) requestExtra {
+	return requestExtra{
+		stopTokenIDs: spec.StopTokenIDs,
+		topP:         spec.TopP,
+		topK:         spec.TopK,
+		seed:         spec.Seed,
+	}
+}
+
+// translateMaxTokens 翻译档 max_tokens 预算（M5 报告 §9 步 2）。
+//
+//  1. 基值取注册表（Translate 1024）；0 视同 1024 下限——短文本行为与历史逐字节一致。
+//  2. 长文本按估算放大：实测 zh→en 输出 ≈0.893 token/源字（§7.3），估算取
+//     输出 ≤ 2×源文 token + 128，双向留足余量。
+//  3. 钳制到 ctx 余量：估算 prompt = 源文 token + 模板/约束头 768 + 估算误差 128。
+//     本服务端构建对 prompt+max_tokens 超限返回 HTTP 400（§7.6），放大必须让位；
+//     余量不足基值时维持基值（不比历史更差），ctx 未知（Deps 未接）时同样只保基值。
+func (t *Translator) translateMaxTokens(spec modelmanager.ModelSpec, text string) int {
+	base := spec.MaxTokens
+	if base < 1024 {
+		base = 1024
+	}
+	srcTok := estimateTokens(text)
+	if ctx := t.ctxTokens(); ctx > 0 {
+		if room := ctx - srcTok - 896; room > base {
+			return max(base, min(2*srcTok+128, room))
+		}
+	}
+	return base
+}
+
+func (t *Translator) ctxTokens() int {
+	if t.deps.CtxTokens == nil {
+		return 0
+	}
+	return t.deps.CtxTokens()
+}
+
+// estimateTokens 粗预算用 token 估算，不是分词器。
+// 实测基准（M5 报告 §7.1）：中文小说 0.69–0.713 token/字，拉丁文 ≈0.25 token/字符。
+// 预算方向取保守高估：非 ASCII 一律 1 token/字符，ASCII 0.5 token/字符。
+// 只用于 max_tokens 预算；M5 步 1 的分块器按文体分档另行实现，不复用此处。
+func estimateTokens(text string) int {
+	ascii, wide := 0, 0
+	for _, r := range text {
+		if r < 0x80 {
+			ascii++
+		} else {
+			wide++
+		}
+	}
+	return ascii/2 + wide
 }
 
 func (r TranslateRequest) constraints() *Constraints {

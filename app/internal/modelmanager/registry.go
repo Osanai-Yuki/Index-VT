@@ -34,6 +34,7 @@ type ModelSpec struct {
 	Temperature float64
 	TopP        float64       // 0 = 不发送（用服务端默认）
 	TopK        int           // 0 = 不发送
+	Seed        int           // 0 = 不发送；Nailong 42（官方脚本固定）
 	StopTokenIDs []int        // Nailong [248044,248046]
 	MaxTokens   int           // Translate 1024；Homura 动态；Nailong 0=服务端上限
 	// 各档位文件（相对仓库根）
@@ -71,6 +72,7 @@ var Registry = []ModelSpec{
 		Temperature:  0.0,
 		TopP:         1.0,
 		TopK:         -1,
+		Seed:         42,
 		StopTokenIDs: []int{248044, 248046},
 		MaxTokens:    0,
 		Files: map[QuantKind]string{
