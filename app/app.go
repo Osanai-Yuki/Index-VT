@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"indexvt/internal/config"
 	"indexvt/internal/csvsanitizer"
+	"indexvt/internal/docpipeline"
 	"indexvt/internal/envprobe"
 	"indexvt/internal/modelmanager"
 	"indexvt/internal/orchestrator"
@@ -39,6 +41,7 @@ type App struct {
 	models  *modelmanager.Manager
 	tr      *translator.Translator
 	sub     *subtitle.Engine
+	docpipe *docpipeline.Engine
 	version string
 	ready   chan struct{} // OnStartup 装配完成后关闭（Wails OnStartup 晚于前端加载，需门禁）
 
@@ -249,6 +252,12 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 		})
 	})
 
+	// 长文档管线（M5）：方向模板 + 术语注入在 docpipeline 组装，本层只桥接
+	// Nailong 通道（模型激活/端口编排由 ResolveEndpoint 承担，与字幕同路）。
+	a.docpipe = docpipeline.NewEngine(func(ctx context.Context, prompt string, maxTokens int) (string, error) {
+		return a.tr.TranslateRawSync(ctx, string(modelmanager.ModelNailong), prompt, maxTokens)
+	})
+
 	// 编排看护协程最后启动：此时 store/cfg/models/tr/sub 均已赋值，
 	// idleWatch 触发的 OnBeforeStop/OnEvent 才不会打到 nil 字段（回调另有 nil 防护兜底）。
 	a.orch.Start()
@@ -265,6 +274,9 @@ func (a *App) shutdown() {
 
 	if !already && orch != nil {
 		_ = orch.PrepareExit() // 兜底全量释放（正常路径走 PrepareExit 绑定）
+	}
+	if a.docpipe != nil {
+		a.docpipe.CancelAll() // 长文档队列与字幕同语义：退出即取消，进程释放由 Job Object 兜底
 	}
 	// 必须无条件执行：PrepareExit 绑定（前端 Ctrl+Q 与点 X 的 OnBeforeClose）会先置 closing，
 	// 若这里因 closing 提前返回，SQLite 句柄在两条退出路径上都不会被关闭，WAL 也不会 checkpoint。
@@ -438,18 +450,9 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 	taskID := fmt.Sprintf("t-%d-%d", time.Now().UnixMilli(), a.taskSeq)
 	a.mu.Unlock()
 
-	glossary := []translator.GlossaryItem{}
-	if req.GlossaryID > 0 {
-		gs, err := a.store.ListGlossaries()
-		if err == nil {
-			for _, g := range gs {
-				if g.ID == req.GlossaryID {
-					for _, it := range g.Items {
-						glossary = append(glossary, translator.GlossaryItem{Term: it.Term, Translation: it.Translation})
-					}
-				}
-			}
-		}
+	glossary, err := a.loadGlossary(req.GlossaryID)
+	if err != nil {
+		return TaskHandle{}, err
 	}
 
 	mode := translator.ModeNormal
@@ -892,14 +895,133 @@ func (a *App) SubExport(docID string, opt subtitle.ExportOptions) error {
 	return nil
 }
 
-// ---------- 文档翻译（M5 预留） ----------
+// ---------- 文档翻译（M5） ----------
 
-func (a *App) DocTranslate(_ map[string]any) (string, error) {
-	return "", errors.New("文档翻译将于 M5 里程碑提供")
+// DocMaxRunes 输入规模上限（M5 报告 §10 决策 5：v1 按 2 万字交付、5 万字封顶）。
+const DocMaxRunes = 50000
+
+// DocRequestUI 长文档翻译请求。
+type DocRequestUI struct {
+	Path       string `json:"path"`
+	Direction  string `json:"direction"` // zh-en / en-zh / zh-ja / ja-zh
+	GlossaryID int64  `json:"glossaryId,omitempty"`
 }
-func (a *App) DocCancel(_ string) error { return errors.New("文档翻译将于 M5 里程碑提供") }
-func (a *App) DocExport(_ string, _ string) error {
-	return errors.New("文档翻译将于 M5 里程碑提供")
+
+// DocTranslate 打开长文档（txt/md，编码识别复用 subtitle.DecodeText）并启动整卷翻译。
+// 进度经 doc:progress 事件、终态经 doc:done 事件（含取消与覆盖率统计）。
+func (a *App) DocTranslate(req DocRequestUI) (string, error) {
+	if err := a.ensureReady(); err != nil {
+		return "", err
+	}
+	dir := translator.NailongDirection(req.Direction)
+	raw, err := os.ReadFile(req.Path)
+	if err != nil {
+		return "", err
+	}
+	text, _ := subtitle.DecodeText(raw)
+	glossary, err := a.loadGlossary(req.GlossaryID)
+	if err != nil {
+		return "", err
+	}
+	docID, err := a.docpipe.Open(req.Path, text, dir, glossary,
+		int(a.cfgSnapshot().EffectiveCtxTokens()), DocMaxRunes)
+	if err != nil {
+		return "", err
+	}
+	if err := a.docRun(docID); err != nil {
+		return "", err
+	}
+	return docID, nil
+}
+
+// DocResume 续跑：只重翻 pending/failed 块，done 保留（取消/失败后的恢复路径）。
+func (a *App) DocResume(docID string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	return a.docRun(docID)
+}
+
+// docRun 启动队列并把管线事件桥到 Wails 事件总线。
+func (a *App) docRun(docID string) error {
+	return a.docpipe.Run(docID,
+		func(p docpipeline.DocProgress) {
+			runtime.EventsEmit(a.ctx, "doc:progress", p)
+		},
+		func(r docpipeline.DocDone) {
+			runtime.EventsEmit(a.ctx, "doc:done", r)
+		},
+	)
+}
+
+// DocCancel 取消整卷任务；已产出块保留，DocResume 可续跑。
+func (a *App) DocCancel(docID string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	a.docpipe.Cancel(docID)
+	return nil
+}
+
+// DocGetDoc 权威快照（进度条对账、事件丢包兜底）。
+func (a *App) DocGetDoc(docID string) (*docpipeline.Doc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.docpipe.Get(docID)
+}
+
+// DocExport 导出（弹出保存对话框）。kind: translation | bilingual。
+func (a *App) DocExport(docID string, kind string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	doc, err := a.docpipe.Get(docID)
+	if err != nil {
+		return err
+	}
+	text, err := a.docpipe.ExportText(docID, docpipeline.ExportKind(kind))
+	if err != nil {
+		return err
+	}
+	base := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
+	suffix := ""
+	if docpipeline.ExportKind(kind) == docpipeline.ExportBilingual {
+		suffix = ".bilingual"
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "导出译文",
+		DefaultFilename: base + suffix + ".txt",
+		Filters:         []runtime.FileFilter{{DisplayName: "TXT", Pattern: "*.txt"}},
+	})
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return nil // 用户取消
+	}
+	return os.WriteFile(path, []byte(text), 0o644)
+}
+
+// loadGlossary 术语本加载（与主翻译台绑定共用 store 读取路径）。
+func (a *App) loadGlossary(id int64) ([]translator.GlossaryItem, error) {
+	if id <= 0 {
+		return nil, nil
+	}
+	gs, err := a.store.ListGlossaries()
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range gs {
+		if g.ID == id {
+			items := make([]translator.GlossaryItem, 0, len(g.Items))
+			for _, it := range g.Items {
+				items = append(items, translator.GlossaryItem{Term: it.Term, Translation: it.Translation})
+			}
+			return items, nil
+		}
+	}
+	return nil, nil
 }
 
 // ---------- 应用 ----------

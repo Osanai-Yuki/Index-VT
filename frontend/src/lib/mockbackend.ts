@@ -228,6 +228,40 @@ const runtime = {
 }
 
 let warnCount = 0
+
+// 长文档演示流（M5 步 4 的 ?mock&page=doc 用）：两段进度 + 完成事件。
+function emitDocDemo(docId: string) {
+  const total = 12000
+  let done = 0
+  const timer = setInterval(() => {
+    done += 6000
+    runtime.EventsEmit('doc:progress', {
+      docId,
+      charsDone: Math.min(done, total),
+      charsTotal: total,
+      etaSeconds: Math.max(0, Math.round((total - done) / 50)),
+    })
+    if (done >= total) {
+      clearInterval(timer)
+      runtime.EventsEmit('doc:done', {
+        docId,
+        coverage: [{ term: '王妃', translation: 'Queen', sourceChunks: 2, hitChunks: 2 }],
+      })
+    }
+  }, 700)
+}
+
+const mockDocSnapshot = () => ({
+  id: 'mock-doc-1',
+  path: 'C:\\docs\\novel.zh.txt',
+  direction: 'zh-en',
+  chunks: [
+    { index: 1, text: '第一章 白狼河……', translated: 'Chapter 1 The White Wolf River…', state: 'done' },
+    { index: 2, text: '第二年开春……', translated: '', state: 'pending' },
+  ],
+  charsTotal: 12000,
+  queueActive: false,
+})
 function emitTranslateDemo(taskId: string, syl: { target: number; actual: number } | null) {
   const text = OUT[0]
   const step = Math.ceil(text.length / 12)
@@ -329,6 +363,16 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
   SubRetryFailed: () => undefined,
   SubRetryCues: () => undefined,
   SubExport: () => undefined,
+  DocTranslate: (req: never) => {
+    const r = req as unknown as { path?: string }
+    void r
+    setTimeout(() => emitDocDemo('mock-doc-1'), 100)
+    return 'mock-doc-1'
+  },
+  DocResume: () => undefined,
+  DocCancel: () => undefined,
+  DocGetDoc: (docId: never) => ({ ...mockDocSnapshot(), id: (docId as unknown as string) ?? 'mock-doc-1' }),
+  DocExport: () => 'models/exports/mock-translation.txt',
   CollectLogs: () => 'logs/mock-bundle.zip',
   OpenModelsFolder: () => undefined,
   OpenLogsFolder: () => undefined,

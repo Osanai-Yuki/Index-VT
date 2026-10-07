@@ -76,6 +76,13 @@ export const apiSubRetryCues = (docId: string, ids: number[], opt: unknown) => c
 export const apiSubGetDoc = (docId: string) => call<any>('SubGetDoc', docId)
 export const apiSubExport = (docId: string, opt: unknown) => call<void>('SubExport', docId, opt)
 
+// ---------- 文档翻译（M5） ----------
+export const apiDocTranslate = (req: { path: string; direction: string; glossaryId?: number }) => call<string>('DocTranslate', req)
+export const apiDocResume = (docId: string) => call<void>('DocResume', docId)
+export const apiDocCancel = (docId: string) => call<void>('DocCancel', docId)
+export const apiDocGetDoc = (docId: string) => call<any>('DocGetDoc', docId)
+export const apiDocExport = (docId: string, kind: 'translation' | 'bilingual') => call<void>('DocExport', docId, kind)
+
 // ---------- 文档 ----------
 export const apiCollectLogs = () => call<string>('CollectLogs')
 export const apiOpenModelsFolder = () => call<void>('OpenModelsFolder')
