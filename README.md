@@ -9,43 +9,43 @@ Windows 上的全本地 AI 翻译工具。主翻译台、字幕工作台、模�
 - 便携布局：`models/` 和 `logs/` 就在 exe 所在目录，整个文件夹拷走即搬家
 
 三个模型的现状并不齐平，读文档时请带上这个前提：`translate` 有完整前后端链路；
-`homura`（配音）后端已实现但前端没有任何入口；`nailong`（长文档）只有下载与登记能用，
-翻译管线是空壳。
+`homura`（配音）后端已实现，主翻译台有配音模式入口（F-07）；`nailong`（长文档）
+下载/登记/翻译管线（`docpipeline`）均已实现，文档翻译页已接入导航
+（Rail → 文档翻译），仅差真机验证（F-08）。
 
 > 运行前必读：`thirdparty/llama-server/` 与 `models/` 被 `.gitignore` 排除，干净克隆里两者都不存在。
 > 必须先补齐（见「首次准备」），否则应用会提示缺少 llama-server。
 
 ---
 
-## 当前状态（2026-10-07）
+## 当前状态（2026-10-09 同步）
 
 | 阶段 | 状态 |
 |---|---|
-| 设计契约（DESIGN.md v2.0「素笺」/ PRD / 动效规范 / spec） | 完成 |
-| Track A 后端止血（B1–B31：崩溃、死锁、丢数据、安全边界） | 已完成并合并 `master`；13 个 Go 包里 12 个有测试且全绿（唯 `docpipeline` 仍是空壳、无测试） |
-| Track B 前端地基（双主题 token / 23 原语 / 事件层 / 九道门禁） | 已完成并合并 `master`（2026-10-07）；承载它的分支 `sujian/track-b-frontend-foundation` 在 fast-forward 合并后已删除，`master` 现为唯一分支 |
-| **瑞士风格重映射（2026-10-06 用户指令）** | 两层 token 值整体切换为 Swiss International（白底黑字红强调、直角、无阴影/渐变、150ms ease-out、Helvetica 栈）；语义名与 utility 名不变；verify-theme 期望值已同步，九道门禁全绿。B33（引导页死胡同）与 B34（显存轮询控制台弹窗）已修复。**DESIGN.md 已升到 v2.1 并整表同步瑞士值**（含 Inter 弃用、圆角归零、动效改 Clean Cut、§12 差异表） |
-| **Track C 页面迁移（2026-10-06，同日完成）** | 全部页面 + 外壳迁到新设计系统并接线：App/Rail/StatusBar/appStore（事件层 `lib/wails` 全量接线）、主翻译台（R17 错误态保留部分译文·前后端、收藏历史、约束抽屉五字段）、模型中心（未知模型归位 UI、alert/confirm → toast/Modal、nailong/homura 激活收口）、字幕工作台（EV.CUE 译文实时刷新 + SubGetDoc 权威对账、SubGetDoc/SubRetryCues 封装补齐）、设置页（主题/字号真正可改）。旧 `styles/tokens.css` 与旧 `components/ui.tsx` 已删除；lint 白名单 13 行 → 1 行（wailsapi.ts）。九道门禁全绿（verify:wails 探针改开 /?primitives——App 接入新事件层后成为合法订阅者，隔离前提需无订阅页面） |
-| **页面级门禁（2026-10-06）** | 新增 `npm run verify:pages`：真页面在 dev 假后端（`?mock`，`lib/mockbackend.ts`）供数下跑 a11y / 对比度 / 键盘三组断言。首轮即抓出并修掉 4 个真缺陷（详见下）|
-| **翻译模式系统（2026-10-06）** | 主翻译台顶栏"模式"下拉：内置 5 个领域约束模板（通用=官方无约束默认 / 政治经济·社科金融 / 计算机·人工智能 / 人文写作 / 医疗生物，`lib/modes.ts`）；切换即整套预填硬/软约束+文体域，抽屉内手动微调自动落到"自定义"档并记忆。设置页新增「翻译模式」卡片管理自定义模式（增删改，localStorage 持久化）。后端零改动（Constraints 五字段链路 Track C 已通） |
-| **模型下载反馈（2026-10-06）** | 点下载此前毫无反馈：`ListModels` 的 `!anyPresent` 兜底跑在下载分支**之后**，把 `StateDownloading` 冲成 `not-downloaded`（`manager.go`），前端因此既无进度也无"完成"。现改为快照外发 + `DownloadProgress` 随 `ModelInfo` 返回，模型中心有进度条、阶段 toast（含 SHA256 校验中），且**下载完即可启用**（`activatable` 此前硬编 `m.id === 'translate'`）。这条缺陷是新增的 `TestListExposesDownloadProgress` 失败暴露的，不是看出来的 |
-| **显存估算按实测重标（2026-10-06）** | 公式收进 `app/internal/vramestimate`，由设置页预估与 `resolveNGL` 共用（此前两处各写一套且互相对不上账）。旧 `[assumption]` 的 KV 斜率 875 MiB/8K 高估 **9.3 倍**，另有 `int(tokens/8192)` 整除让 2K/4K 档 KV 项恒为 0 —— 叠加后果是把 4GB 卡上真能跑的 32K/64K 一律误判超限。`resolveNGL` 也从「只看权重」改为按 ctx 反推，堵住"剩余显存够小 ctx 不够大 ctx"时下发 `-ngl 99` 导致加载失败的窗口。回归锁 `TestForNeverUnderPredictsMeasured` 用五个实测点**单向**钉住（许高报不许低报） |
-| **M5 长文档：前置调研完成，未开工** | 功能进度仍 ≈ 0（管线空壳、绑定返回占位、前端无入口）。已证实的真正阻塞**不是**上下文容量而是写死的 `max_tokens=1024`（`translator.go:243`）；分块漂移真实存在且随跨度增长，向官方模板【约束要求】追加固定译名表可消除被覆盖实体的漂移，但**用翻译模型通读全文自动生成该表已被证否**。全部结论与复跑口径见 `docs/superpowers/specs/2026-10-06-m5-longdoc-feasibility.md` |
-| **集成与出包（2026-10-07）** | Track B/C 及其后的全部工作以三个提交（`feat(backend)` / `feat(frontend)` / `docs`）fast-forward 进 `master`，分支删除；合并结果上重跑 `go test -count=1`（13 包）、`verify:all`、`verify:pages`，均 exit 0。exe 已重建 |
+| 设计契约（DESIGN.md v2.1 瑞士风格 / PRD / 动效规范 / spec） | 完成 |
+| Track A 后端止血（B1–B31：崩溃、死锁、丢数据、安全边界） | 已完成并合并 `master`；13 个 Go 包全部有测试且全绿 |
+| Track B 前端地基（双主题 token / 23 原语 / 事件层 / 九道门禁） | 已完成并合并 `master` |
+| Track C 页面迁移（5 个页面 + 外壳迁到新设计系统并接线） | 已完成并合并 `master` |
+| 瑞士风格重映射（v2.1） | 完成；两层 token 值整体切换为 Swiss International |
+| 翻译模式系统（5 个内置领域模板 + 自定义模式） | 完成 |
+| 模型下载反馈（进度条 + 阶段 toast + 下载完即可启用） | 完成 |
+| 显存估算按实测重标（`internal/vramestimate`） | 完成；回归锁 `TestForNeverUnderPredictsMeasured` |
+| **M5 长文档翻译** | **完成**（待真机验证）；docpipeline 引擎（chunker + pipeline）、术语注入、覆盖率度量、后端绑定 6 个（DocTranslate/DocResume/DocCancel/DocGetDoc/DocExport/DocPick）、前端页面 `DocTranslate.tsx`（已接入导航：Rail 解灰 + `App.tsx` 路由到 `DocTranslatePage`）均已实现；`verify:pages` 三组门禁均含 doc 页靶子；F-08 用例待验证 |
+| **M4 字幕编辑与样式** | **完成**；引擎五操作+删除插入+样式引擎、10 个后端绑定、F-22 虚拟化（DataTable 56px）、行内编辑（原文/译文/时间 ±100ms）、平移/校准 Modal、样式库面板+ASS 序列化、右键菜单、预览画布（16:9）均完成；待真机验证（F-17/F-18）。设计文档见 `docs/superpowers/specs/2026-10-07-m4-subtitle-editing-design.md` |
+| **全量 QA 复检（BUG/安全审查）** | **完成**（2026-10-09）；后端/前端逐包逐页审查 + 6 项缺陷修复（含 1 项白屏崩溃）、安全面全查（注入/穿越/SQL/下载/XSS）未发现高危漏洞；交互回归 11/11、全部门禁复跑全绿。详见 `docs/项目状态报告-2026-10-08.md`「十」 |
+| 集成与出包 | M4 全部 + M5 前端 + QA 修复已提交（`b50c496`）；exe 已于 2026-10-09 18:08 重建并通过嵌入自检，**QA 修复已进产物**；文档同步为随后一笔 |
 
-页面的过渡期结束了：Track C 已把 5 个页面迁完，新旧两层 token 值在 2026-10-06 统一为
-瑞士风格（白底/黑墨/红强调），观感一致。
+**项目规模**：Go 源文件 70 个（39 实现 + 31 测试），前端源文件 49 个，UI 组件 23 个原语，页面 6 个。
 
-`app/build/bin/Index-VT.exe` 最近一次重建是 **2026-10-07 18:11**（20,568,576 B），当前与
-`master` 源码同步。嵌入自检：整份 JS bundle 与 CSS **逐字节**包含于 exe；`suj-ink-1` 命中 7；
-绿色 `--suj-ok` 的 `#2e6b4f`/`#5fbf8f`、`Archivo`/`Noto Sans SC`、以及本轮新增的功能串
-`下载中`/`仍要使用`/`SHA256 校验中`/`取消下载` 均在；`verify-*` 不在（dev-only 正确出局）。
-界面与源码不同步时先重新构建再判断 —— 只跑 `wails build` 会静默嵌旧前端，必须走
-`node scripts/build.mjs`。
+**验收用例**：24 条用例中，12 条发布阻塞项（★）已实现 12 条待真机验证；M4 相关 F-17（行内编辑/平移/校准/右键菜单完成）、F-18（样式库面板+ASS 序列化+预览画布完成）、F-22（虚拟化完成）均已实现。
 
-发布约束（更新）：原「Track B 不得单独出包」的成因是旧页面在新色相下跌破对比度，这条已随
-Track C 与两层 token 对齐而解除。要出包仍需重新构建（`node scripts/build.mjs`）并跑一遍
-`verify:all` + `verify:pages`；本机 Win32 手工验收项（见「已知限制」）与它无关，仍然待做。
+**下一步重点**（完整规划见 `docs/项目状态报告-2026-10-08.md`「七」）：
+1. ~~产物收口~~（2026-10-09 完成：`b50c496` 提交 + exe 重建 + 基线复跑全绿）
+2. M4 真机验证（F-17/F-18，含 QA 修复点回归）
+3. 完成 M5 真机验证（F-08 长文档翻译用例）
+4. 准备 M6 性能与环境验收（JetBrains Mono 许可证为发布阻塞项）
+
+详细状态报告见 `docs/项目状态报告-2026-10-08.md`。
 
 ### 页面级门禁首轮抓出的 4 个真缺陷（2026-10-06，均已修）
 
@@ -57,6 +57,20 @@ Track C 与两层 token 对齐而解除。要出包仍需重新构建（`node sc
 | 瑞士红 `#E60000` 只按白底校验 | 压在 `accentSoft`/`dangerSoft` 6% 底上 4.34:1、sunken 上 4.22:1（模型中心空闲条、"保持加载"、状态栏崩溃徽标） | light `--suj-accent`/`--suj-danger` → `#D40000`（白 5.53 / soft 4.98 / sunken 4.85） |
 
 外加 Settings 三个裸 `<input>`（ngl / CPU 线程 / 历史上限）补了 `aria-label`——axe 判 critical。
+
+### 全量 QA 复检修掉的 6 个缺陷（2026-10-09，均已修）
+
+| 缺陷 | 症状 | 修法 |
+|---|---|---|
+| 字幕详情面板 `find(...)!` 非空断言 | 删除最后一条 cue 后整页白屏（`c.index` 抛 TypeError） | 渲染守卫 + 删除后清空选中（`SubtitleWorkbench.tsx`） |
+| 时间 ±100ms 无边界校验 | 连点造出负时间 / 起止倒挂，时间码渲染垃圾、导出非法字幕 | 前端钳制 + `edit.go` `UpdateCue` 校验兜底（+3 回归测试） |
+| 文档页事件未按 docId 过滤 | 翻译中导入新文档，旧文档进度/终态覆盖当前文档甚至换掉显示中的快照 | `docIdRef` 严格匹配过滤（`DocTranslate.tsx`） |
+| 平移/校准 Modal 裸 `<input>` | axe critical（Modal 关闭态不进扫描故此前未暴露） | 补 `aria-label` |
+| `DocExport` 取消保存仍提示「已导出」 | 假成功 toast，误认为文件已落盘 | 绑定返回实际路径（空串=取消），按返回值决定 toast |
+| mock 演示文档永不完成 | `?mock&page=doc` 导出按钮永不出现，导出流程无法验证 | `docDemoDone` 同步进快照 |
+
+安全面（命令/参数注入、路径穿越、SQL 注入、下载 SSRF/续传/校验、XSS、崩溃/死锁）逐项核查**未发现高危漏洞**；
+遗留低危项 6 条登记在 `docs/已知限制清单-2026-10-09.md`「G 组」。完整 QA 记录见 `docs/项目状态报告-2026-10-08.md`「十」。
 
 ## 环境要求
 
@@ -185,9 +199,9 @@ app/build/bin/Index-VT.exe -version   # 打印版本后退出
   代价是跳过优雅停止与应用侧清理，WAL 靠下次启动恢复。优先用 X / Ctrl+Q
 - 空闲卸载：无任务持续 N 分钟自动卸载。设置页 1–30 分钟，或设 0 常驻；越界值会被 `config.Normalize`
   收敛回默认 5 分钟（`app/internal/config/config.go:98`）
-- 主题：实际由浏览器存储的 `localStorage['indexvt.theme']` 决定，默认 `system`，
-  由 `index.html` 内联首屏脚本与 `frontend/src/main.tsx:23` 应用，重启保持。
-  设置页上的主题与字号控件是只读展示，改了不生效；Go 侧 `config.Appearance` 有字段但无人读写
+- 主题：默认 `system` 跟随系统，设置页可显式切换 light/dark 并持久化
+  （`frontend/src/theme/theme.ts` + `Settings.tsx:163`，存 localStorage
+  `indexvt.theme` 与配置 `appearance.theme`，重启保持）
 
 ### 数据与日志位置
 
@@ -241,8 +255,8 @@ cd frontend && npx vite --host 127.0.0.1 --port 5173
 #  http://127.0.0.1:5173/?mock&page=subtitle  字幕页（点「导入字幕」出一份 48 条 cue 的样例）
 ```
 
-假后端覆盖 `wailsapi.ts` 里全部 37 个绑定（另有一个未封装的 `ExportGlossaryCSV`）；
-未覆盖的方法 resolve(null) 并在控制台点名。
+假后端覆盖 `wailsapi.ts` 里全部 54 个绑定（另有一个未封装的 `ExportGlossaryCSV`，
+同样已实现）；未覆盖的方法 resolve(null) 并在控制台点名。
 
 ## 验证门禁
 
@@ -307,14 +321,14 @@ cd frontend && npm run verify:pages
 ```
 app/                      Go 后端（模块 indexvt）
   main.go                 Wails 入口：单实例锁 → 日志 → 装配 → UI
-  app.go                  绑定层（前端唯一 API 面，51 个导出方法）
+  app.go                  绑定层（前端唯一 API 面，65 个导出方法）
   frontenddist/           前端 embed 源（构建产物，gitignored，由 scripts/build.mjs 同步）
   internal/
     orchestrator/         llama-server 生命周期、空闲卸载、热切换、状态机
     modelmanager/         三模型注册表、下载（双源 + 续传 + 校验）、路径安全
     translator/           提示词、SSE 流式、off-target 检测、首字节看门狗
-    subtitle/             SRT/ASS/VTT/LRC 解析与保真导出、翻译队列
-    docpipeline/          长文档：只有类型与接口，无实现（M5 范围）
+    subtitle/             SRT/ASS/VTT/LRC 解析与保真导出、翻译队列、编辑引擎（M4 五操作+删除插入+样式）
+    docpipeline/          长文档：token-budget 分块、翻译队列、术语注入、覆盖率度量
     store/                SQLite（历史/配置/术语/模型登记）
     envprobe/             GPU / llama-server / 残留进程探测
     winproc/              Win32：互斥锁、job object、控制台、进程句柄
@@ -324,7 +338,7 @@ frontend/                 React 前端
   src/lib/                wails 事件层 / 错误映射 / 格式化 / 虚拟化 / useDismissable /
                           modes.ts（翻译模式模板）/ mockbackend.ts（dev 假后端，?mock）
   src/components/ui/      23 个原语（Button…DataTable）
-  src/pages/              5 个页面 + _Primitives 陈列页
+  src/pages/              6 个页面（主翻译台/字幕工作台/文档翻译/模型中心/设置/引导页）+ _Primitives 陈列页
   src/wailsapi.ts         RPC 薄封装（事件走 lib/wails，调用仍走这里）
   src/vite-env.d.ts       import.meta.env 类型（Vite 客户端类型引用）
   scripts/                门禁脚本（lint-design-tokens / verify-*）
@@ -365,15 +379,11 @@ spark-output/             PRD 与动效规范等设计链产物
 ## 已知限制
 
 - 只做 Windows，不考虑跨平台
-- cue 编辑与时间轴操作（行内编辑、±100ms、拆分合并、整体平移、两点校准）后端不存在，UI 也未做
-  —— 属 M4 计划范围（`docs/04-交付与验收方案.md` §5 里程碑表），不是 Track C 的遗漏
-- 长文档翻译：`docpipeline` 是接口空壳，`DocTranslate`/`DocCancel`/`DocExport` 三个绑定直接返回
-  「文档翻译将于 M5 里程碑提供」。导航里那一项是置灰的（`Rail.tsx:9`，标题「文档翻译（M5 提供）」），
-  点进去是占位页，前端从未调用过这三个绑定
-- 配音模式（Homura）后端已实现（prompt 构造、`ModeDubbing`、音节计数都在），但前端零入口，
-  所以用户目前用不到；`StatusBar` 里只有一处模型名映射
-- 模型中心的激活收口在 UI 层：只有 `translate` 可设为当前模型（`ModelHub.tsx:143`），
-  `nailong`/`homura` 的按钮不可点。后端 `SetActiveModel` 本身没有守卫，绕过 UI 直接调用仍可设置
+- 配音模式（Homura）已有主翻译台入口（F-07，音节预算 UI）；但 `nailong`/`homura`
+  被激活后主翻译台仍用通用提示词驱动（模型中心有警告条如实说明），官方模板链路待后续里程碑
+- 模型中心的激活收口已放开：文件已登记进 store 即可「设为当前」（`ModelHub.tsx:200` 起），
+  不再写死只允许 `translate`；非 translate 模型激活后显示警告条。后端 `SetActiveModel`
+  本身没有守卫，绕过 UI 直接调用仍可设置
 - 设置页的「关闭程序时」是无 `onChange` 的单选展示（退出即释放是唯一实现）；主题与字号已可改
   （Track C 接通了 `applyTheme`/`applyFontSize` + 配置持久化）
 - 状态栏的「离线可用」徽标是写死的静态元素（`StatusBar.tsx:93`），不来自后端状态。Go 侧
@@ -396,3 +406,6 @@ spark-output/             PRD 与动效规范等设计链产物
   显存峰值与失败时的 orchestrator 退避从未实测；ctx 自定义刚落地时建议首次用超 32K 档位时手工观察一次。
   显存估算是线性模型（偏差 ±20%，见 `EstimateCtxVRAM` 的 `basis`），不是测量值
 - `go test -race` 不可用；Win32 进程与显存行为只能真机手工验收
+
+已知限制的完整清单（发布阻塞 / 环境依赖 / 功能限制 / a11y 缺口 / 性能未定项 /
+工程约束，逐条含处置建议）见 `docs/已知限制清单-2026-10-09.md`。

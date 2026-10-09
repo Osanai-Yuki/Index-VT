@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | **日期** | 2026-10-07 |
-| **状态** | 设计完成，待实施（按 §7 任务序） |
+| **状态** | 已实施（2026-10-08），待真机验证（F-17/F-18）。落地口径与本文的偏差：绑定实为 **10 个**（本文 §1 写 8 个，新增 `SubDeleteCues`/`SubInsertCue`/`SubAssignStyle` 中的删除/插入/指派，`SubCalibrate` 也在内）；样式引擎落在 `astisub.go`+`edit.go` 而非独立 `style.go` |
 | **上游** | `docs/01-设计方案文档.md` §6.3（工具栏/行内编辑/样式编辑/接口名）、`docs/04-交付与验收方案.md` ★F-17 / F-18 / F-22、`docs/02-执行细节说明.md` 开篇校正说明（五操作与样式库是仅存未落地的两块） |
-| **影响面** | `app/internal/subtitle/`（编辑/样式引擎）、`app/app.go`（8 个新绑定）、`frontend/src/pages/SubtitleWorkbench.tsx`（重构为虚拟化 + 编辑交互）、`frontend/wailsapi.ts` |
+| **影响面** | `app/internal/subtitle/`（编辑/样式引擎：`edit.go`+`edit_test.go`+`astisub.go`）、`app/app.go`（10 个新绑定）、`frontend/src/pages/SubtitleWorkbench.tsx`（重构为虚拟化 + 编辑交互，+776/-77）、`frontend/src/wailsapi.ts`（+13） |
 | **出口条件** | ★F-17 / F-18 / F-22 通过（docs/04 §5） |
 | **本文职责** | 编辑操作的后端契约与语义、样式库数据模型、前端交互形态、F-22 虚拟化方案。不重复 01 文档的界面布局描述 |
 

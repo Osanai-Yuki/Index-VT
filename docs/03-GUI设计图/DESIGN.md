@@ -316,7 +316,7 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 
 - **Rail**：宽 64（`w-16`，token `--h-rail`），`--surface` 底 + 右缘 `1px --line`。顶部 logo 36×36 方块（`--accent` 底 + `--canvas` 字）。项 44×44（`--h-rail-item`），图标 19px stroke 1.8；激活 = `--accent` 图标 + `--accent-soft` 底 + 左缘 `2px --accent` 竖条（`-left-2.5` = -10px，正好是 rail 64 减 item 44 的一半；曾用 `-left-[10px]` 任意值，2026-10-06 已收口，同时 lint 的任意值前缀表补上了 `left|right|top|bottom|inset`）；hover = `--sunken` 底；未激活图标 `--ink-3`。每项 `title` 提示；有进行中任务的页在右上显示 6px `--ok` 点。
 - **StatusBar**：高 40（token `--h-status`），`--surface` 底 + 顶缘 `1px --line`，`--text-micro` + `--font-mono` + `--ink-2`，项间距 16（**不用竖线分隔符**，留白即分隔）；可点项是真实 button。**整条横跨窗口全宽**（不缩在 rail 右侧），顶缘结构线因此是一条连续线，rail 的右缘线止于状态栏上沿，左下角不成缺口。左内缩 = `--h-rail` + `--pad-shell-x`（92），使首个 chip 与页面内容左缘对齐——同一值由 `main` 的 `padding-inline` 共用，对齐是写死的契约不是巧合。40px 高的条不允许任何一项换行：整条 `whitespace-nowrap` + `overflow-hidden`，挤压只由两处吸收——VRAM 进度条先缩（`w-24` → `min-w-4`），不够再截「全本地推理 · 零遥测」（`min-w-0 shrink truncate`）；chip、显存读数、倒计时一律 `shrink-0`。
-- 导航目标：翻译台 / 字幕 / 模型 · 术语 / 设置（4 项可点）。**文档翻译保留为 disabled 项**，标题自带「文档翻译（M5 提供）」、`opacity-30` + `cursor-not-allowed`、不可点。旧实现是"可点但指向占位页"，那是假入口；现在这种是**如实标注的未实现项**，两者按 §10 分别处置。
+- 导航目标：翻译台 / 字幕 / 文档翻译 / 模型 · 术语 / 设置（5 项可点）。**文档翻译原为 disabled 项**（2026-10-08 及之前「如实标注的未实现项」处置：标题带「（M5 提供）」、`opacity-30` + `cursor-not-allowed`），M5 落地后于 2026-10-09 解灰——标题去后缀、与其余四项同权（可点、无 `opacity-30`）。旧实现"可点但指向占位页"是假入口，两者按 §10 分别处置；占位页已随接线删除。
 
 ---
 
