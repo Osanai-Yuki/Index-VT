@@ -37,9 +37,11 @@ export function DeleteModel(arg1:string,arg2:string):Promise<void>;
 
 export function DocCancel(arg1:string):Promise<void>;
 
-export function DocExport(arg1:string,arg2:string):Promise<void>;
+export function DocExport(arg1:string,arg2:string):Promise<string>;
 
 export function DocGetDoc(arg1:string):Promise<docpipeline.Doc>;
+
+export function DocPick():Promise<main.DocPickResult>;
 
 export function DocResume(arg1:string):Promise<void>;
 
@@ -97,11 +99,21 @@ export function StarHistory(arg1:number,arg2:boolean):Promise<void>;
 
 export function State():Promise<string>;
 
+export function SubAssignStyle(arg1:string,arg2:Array<number>,arg3:string):Promise<subtitle.SubtitleDoc>;
+
+export function SubCalibrate(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number):Promise<subtitle.SubtitleDoc>;
+
 export function SubCancelQueue(arg1:string):Promise<void>;
+
+export function SubDeleteCues(arg1:string,arg2:Array<number>):Promise<subtitle.SubtitleDoc>;
 
 export function SubExport(arg1:string,arg2:subtitle.ExportOptions):Promise<void>;
 
 export function SubGetDoc(arg1:string):Promise<subtitle.SubtitleDoc>;
+
+export function SubInsertCue(arg1:string,arg2:number):Promise<subtitle.SubtitleDoc>;
+
+export function SubMergeCues(arg1:string,arg2:number,arg3:number):Promise<subtitle.SubtitleDoc>;
 
 export function SubOpen():Promise<subtitle.SubtitleDoc>;
 
@@ -113,6 +125,16 @@ export function SubRetryCues(arg1:string,arg2:Array<number>,arg3:subtitle.QueueO
 
 export function SubRetryFailed(arg1:string,arg2:subtitle.QueueOptions):Promise<void>;
 
+export function SubSetStyle(arg1:string,arg2:subtitle.StyleDef):Promise<subtitle.SubtitleDoc>;
+
+export function SubShiftAll(arg1:string,arg2:number):Promise<subtitle.SubtitleDoc>;
+
+export function SubSplitCue(arg1:string,arg2:number,arg3:number):Promise<subtitle.SubtitleDoc>;
+
+export function SubStyles(arg1:string):Promise<Array<subtitle.StyleDef>>;
+
 export function SubTranslate(arg1:string,arg2:subtitle.QueueOptions):Promise<void>;
+
+export function SubUpdateCue(arg1:string,arg2:number,arg3:subtitle.CuePatch):Promise<subtitle.SubtitleDoc>;
 
 export function Translate(arg1:main.TranslateRequestUI):Promise<main.TaskHandle>;

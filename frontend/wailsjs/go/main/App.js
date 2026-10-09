@@ -66,6 +66,10 @@ export function DocGetDoc(arg1) {
   return window['go']['main']['App']['DocGetDoc'](arg1);
 }
 
+export function DocPick() {
+  return window['go']['main']['App']['DocPick']();
+}
+
 export function DocResume(arg1) {
   return window['go']['main']['App']['DocResume'](arg1);
 }
@@ -178,8 +182,20 @@ export function State() {
   return window['go']['main']['App']['State']();
 }
 
+export function SubAssignStyle(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SubAssignStyle'](arg1, arg2, arg3);
+}
+
+export function SubCalibrate(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['SubCalibrate'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function SubCancelQueue(arg1) {
   return window['go']['main']['App']['SubCancelQueue'](arg1);
+}
+
+export function SubDeleteCues(arg1, arg2) {
+  return window['go']['main']['App']['SubDeleteCues'](arg1, arg2);
 }
 
 export function SubExport(arg1, arg2) {
@@ -188,6 +204,14 @@ export function SubExport(arg1, arg2) {
 
 export function SubGetDoc(arg1) {
   return window['go']['main']['App']['SubGetDoc'](arg1);
+}
+
+export function SubInsertCue(arg1, arg2) {
+  return window['go']['main']['App']['SubInsertCue'](arg1, arg2);
+}
+
+export function SubMergeCues(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SubMergeCues'](arg1, arg2, arg3);
 }
 
 export function SubOpen() {
@@ -210,8 +234,28 @@ export function SubRetryFailed(arg1, arg2) {
   return window['go']['main']['App']['SubRetryFailed'](arg1, arg2);
 }
 
+export function SubSetStyle(arg1, arg2) {
+  return window['go']['main']['App']['SubSetStyle'](arg1, arg2);
+}
+
+export function SubShiftAll(arg1, arg2) {
+  return window['go']['main']['App']['SubShiftAll'](arg1, arg2);
+}
+
+export function SubSplitCue(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SubSplitCue'](arg1, arg2, arg3);
+}
+
+export function SubStyles(arg1) {
+  return window['go']['main']['App']['SubStyles'](arg1);
+}
+
 export function SubTranslate(arg1, arg2) {
   return window['go']['main']['App']['SubTranslate'](arg1, arg2);
+}
+
+export function SubUpdateCue(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SubUpdateCue'](arg1, arg2, arg3);
 }
 
 export function Translate(arg1) {

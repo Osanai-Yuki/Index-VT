@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,8 +91,7 @@ func parseASS(text string) (cues []Cue, styles []StyleDef, headerLines, eventsFo
 			headerLines = append(headerLines, ln)
 		case "[V4+ Styles]", "[V4 Styles]":
 			if strings.HasPrefix(trimmed, "Style:") {
-				name := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(trimmed, "Style:"), ",", 2)[0])
-				styles = append(styles, StyleDef{Name: name, Raw: trimmed})
+				styles = append(styles, parseStyleLine(trimmed))
 			}
 			if strings.HasPrefix(trimmed, "Format:") {
 				styleFieldIdx = assFieldIndex(strings.TrimPrefix(trimmed, "Format:"))
@@ -372,4 +372,135 @@ func patchASSHeaders(out []byte, doc *SubtitleDoc, dialogueLines []string) strin
 		b.WriteString(eventsPart)
 	}
 	return b.String()
+}
+
+// ============================================================================
+// ASS 样式结构化解析/重建（M4 §2）
+// ============================================================================
+
+// assColorToRGB 将 ASS 颜色（&HAABBGGRR 或 &HBBGGRR）转换为 #RRGGBB。
+// 未知/空值/非十六进制返回 #000000。
+func assColorToRGB(ass string) string {
+	h := strings.TrimSpace(strings.ToLower(ass))
+	h = strings.TrimPrefix(h, "&h")
+	if len(h) < 6 || !isHexString(h) {
+		return "#000000"
+	}
+	// 末 6 位为 BBGGRR；不足 8 位时按 BBGGRR 处理
+	var bb, gg, rr string
+	if len(h) >= 8 {
+		bb, gg, rr = h[2:4], h[4:6], h[6:8]
+	} else {
+		bb, gg, rr = h[0:2], h[2:4], h[4:6]
+	}
+	return "#" + strings.ToUpper(rr + gg + bb)
+}
+
+// isHexString 检查 s 是否仅含十六进制字符。
+func isHexString(s string) bool {
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// rgbToAssColor 将 #RRGGBB 转换为 ASS 颜色 &H00BBGGRR（alpha 固定 00）。
+// 非法值返回 &H00000000。
+func rgbToAssColor(rgb string) string {
+	h := strings.TrimSpace(strings.ToLower(strings.TrimPrefix(strings.TrimSpace(rgb), "#")))
+	if len(h) < 6 {
+		return "&H00000000"
+	}
+	return "&H00" + strings.ToUpper(h[4:6] + h[2:4] + h[0:2])
+}
+
+// parseStyleLine 解析 ASS Style: 行为 StyleDef。
+// 字段按 V4+ 顺序（Name,FontName,FontSize,PrimaryColour,...,Alignment,...,Outline,...,MarginV,...），
+// 字段数不足时只填充可用字段；未映射字段保留在 Raw。
+func parseStyleLine(raw string) StyleDef {
+	st := StyleDef{Name: "", Raw: raw}
+	body := strings.TrimPrefix(strings.TrimSpace(raw), "Style:")
+	fields := strings.Split(body, ",")
+	for i := range fields {
+		fields[i] = strings.TrimSpace(fields[i])
+	}
+	if len(fields) < 1 {
+		return st
+	}
+	st.Name = fields[0]
+	if len(fields) > 1 {
+		st.FontName = fields[1]
+	}
+	if len(fields) > 2 {
+		st.FontSize, _ = strconv.Atoi(fields[2])
+	}
+	if len(fields) > 3 {
+		st.PrimaryRGB = assColorToRGB(fields[3])
+	}
+	if len(fields) > 5 {
+		st.OutlineRGB = assColorToRGB(fields[5])
+	}
+	if len(fields) > 7 {
+		st.Bold = fields[7] == "-1"
+	}
+	if len(fields) > 16 {
+		st.Outline, _ = strconv.ParseFloat(fields[16], 64)
+	}
+	if len(fields) > 18 {
+		st.Alignment, _ = strconv.Atoi(fields[18])
+	}
+	if len(fields) > 21 {
+		st.MarginV, _ = strconv.Atoi(fields[21])
+	}
+	return st
+}
+
+// buildStyleLine 从 StyleDef 重建 ASS Style: 行。
+// 以 Raw 为底：按原字段顺序替换结构化字段对应的值，未映射字段
+// （SecondaryColour/BackColour/Italic/ScaleX/BorderStyle/Shadow 等）逐字保留。
+// Raw 缺失或字段数不足时按 V4+ 默认补全。
+func buildStyleLine(s StyleDef) string {
+	if s.Raw == "" {
+		return fmt.Sprintf("Style: %s,%s,%d,%s,&H000000FF,%s,&H00000000,%d,0,0,0,100,100,0,0,1,%g,0,%d,10,10,10,%d,1",
+			s.Name, orDefault(s.FontName, "Arial"), s.FontSize,
+			rgbToAssColor(s.PrimaryRGB), rgbToAssColor(s.OutlineRGB),
+			boolToInt(s.Bold), s.Outline, s.Alignment, s.MarginV)
+	}
+	body := strings.TrimPrefix(strings.TrimSpace(s.Raw), "Style:")
+	fields := strings.Split(body, ",")
+	for i := range fields {
+		fields[i] = strings.TrimSpace(fields[i])
+	}
+	set := func(idx int, val string) {
+		for len(fields) <= idx {
+			fields = append(fields, "")
+		}
+		fields[idx] = val
+	}
+	set(0, s.Name)
+	set(1, s.FontName)
+	set(2, strconv.Itoa(s.FontSize))
+	set(3, rgbToAssColor(s.PrimaryRGB))
+	set(5, rgbToAssColor(s.OutlineRGB))
+	set(7, strconv.Itoa(boolToInt(s.Bold)))
+	set(16, strconv.FormatFloat(s.Outline, 'f', -1, 64))
+	set(18, strconv.Itoa(s.Alignment))
+	set(21, strconv.Itoa(s.MarginV))
+	return "Style: " + strings.Join(fields, ",")
+}
+
+func orDefault(v, d string) string {
+	if v == "" {
+		return d
+	}
+	return v
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return -1
+	}
+	return 0
 }

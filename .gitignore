@@ -32,3 +32,5 @@ logs/
 # 因此 docs/01 §3.2 与 m5-longdoc 可行性文档里对该目录的引用在干净克隆中会落空，
 # 引用处已就地标注「不入库」。
 docs/superpowers/spikes/
+# Local Pi runtime state
+.atl/

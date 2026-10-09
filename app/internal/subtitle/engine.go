@@ -56,10 +56,22 @@ type Cue struct {
 	NeedsCheck bool     `json:"needsCheck,omitempty"` // 覆写标签回填失败
 }
 
-// StyleDef ASS 样式定义（保真用原始字段）。
+// StyleDef ASS 样式定义（结构化字段 + 原始行保真）。
+// 结构化字段供前端编辑；Raw 保留完整 Style: 行用于序列化回写
+// （未映射字段如 BorderStyle/Shadow/ScaleX 等逐字保留，M4 §2）。
+// Raw 标记 json:"-"：不暴露前端，前端只编辑结构化字段，
+// SetStyle 由引擎从结构化字段重建 Raw。
 type StyleDef struct {
-	Name string `json:"name"`
-	Raw  string `json:"raw"` // 完整 Style: 行
+	Name       string  `json:"name"`
+	FontName   string  `json:"fontName"`
+	FontSize   int     `json:"fontSize"`
+	PrimaryRGB string  `json:"primaryRGB"` // #RRGGBB（ASS &HAABBGGRR 转换）
+	OutlineRGB string  `json:"outlineRGB"` // #RRGGBB
+	Outline    float64 `json:"outline"`   // 描边宽度
+	Bold       bool    `json:"bold"`
+	Alignment  int     `json:"alignment"` // ASS numpad 1-9（底部居中=2）
+	MarginV    int     `json:"marginV"`
+	Raw        string  `json:"-"` // 完整 Style: 行（序列化回写用）
 }
 
 // SubtitleDoc 打开的字幕文档。

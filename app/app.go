@@ -895,6 +895,88 @@ func (a *App) SubExport(docID string, opt subtitle.ExportOptions) error {
 	return nil
 }
 
+// ---------- 字幕编辑（M4） ----------
+
+// SubUpdateCue 行内编辑：改 index 对应 cue 的任意子集。不改序号。
+func (a *App) SubUpdateCue(docID string, index int, patch subtitle.CuePatch) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.UpdateCue(docID, index, patch)
+}
+
+// SubSplitCue 拆分：atMs ∈ (start, end) 开区间。
+func (a *App) SubSplitCue(docID string, index int, atMs int64) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.SplitCue(docID, index, atMs)
+}
+
+// SubMergeCues 合并连续区间 [from..to]（≥2 条）。
+func (a *App) SubMergeCues(docID string, fromIndex, toIndex int) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.MergeCues(docID, fromIndex, toIndex)
+}
+
+// SubShiftAll 整体平移：全部条目 start/end += deltaMs。
+func (a *App) SubShiftAll(docID string, deltaMs int64) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.ShiftAll(docID, deltaMs)
+}
+
+// SubCalibrate 两点校准：线性映射。
+func (a *App) SubCalibrate(docID string, anchor1Idx, anchor2Idx int, anchor1Ms, anchor2Ms int64) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.Calibrate(docID, anchor1Idx, anchor2Idx, anchor1Ms, anchor2Ms)
+}
+
+// SubDeleteCues 删除选中条目，重排。
+func (a *App) SubDeleteCues(docID string, indices []int) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.DeleteCues(docID, indices)
+}
+
+// SubInsertCue 在 afterIndex 后插一条 2s 空白 cue。
+func (a *App) SubInsertCue(docID string, afterIndex int) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.InsertCue(docID, afterIndex)
+}
+
+// SubStyles 返回文档的样式库列表（结构化字段）。
+func (a *App) SubStyles(docID string) ([]subtitle.StyleDef, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.Styles(docID)
+}
+
+// SubSetStyle 按 Name upsert 样式（存在则改，不存在则追加）。
+func (a *App) SubSetStyle(docID string, style subtitle.StyleDef) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.SetStyle(docID, style)
+}
+
+// SubAssignStyle 按行指派样式（indices 为 1 起始序号列表）。
+func (a *App) SubAssignStyle(docID string, indices []int, styleName string) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.AssignStyle(docID, indices, styleName)
+}
+
 // ---------- 文档翻译（M5） ----------
 
 // DocMaxRunes 输入规模上限（M5 报告 §10 决策 5：v1 按 2 万字交付、5 万字封顶）。
@@ -905,6 +987,43 @@ type DocRequestUI struct {
 	Path       string `json:"path"`
 	Direction  string `json:"direction"` // zh-en / en-zh / zh-ja / ja-zh
 	GlossaryID int64  `json:"glossaryId,omitempty"`
+}
+
+// DocPickResult 文件预读结果（选择文件但不建任务，方向/术语本在页面确认后再 DocTranslate）。
+type DocPickResult struct {
+	Path        string `json:"path"`
+	Chars       int    `json:"chars"`
+	TooLong     bool   `json:"tooLong"`
+	Unsupported bool   `json:"unsupported"`
+}
+
+// DocPick 弹出文件对话框（txt/md）并预读：返回路径与字数供页面确认，
+// 超上限/空文件在此时就地标记，避免用户配置完方向才被拒绝。
+func (a *App) DocPick() (*DocPickResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "导入长文档（txt / md）",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "文本文档 (*.txt;*.md)", Pattern: "*.txt;*.md"},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, nil // 用户取消
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	text, _ := subtitle.DecodeText(raw)
+	res := &DocPickResult{Path: path, Chars: len([]rune(text))}
+	res.TooLong = res.Chars > DocMaxRunes
+	res.Unsupported = strings.TrimSpace(text) == ""
+	return res, nil
 }
 
 // DocTranslate 打开长文档（txt/md，编码识别复用 subtitle.DecodeText）并启动整卷翻译。
@@ -972,17 +1091,18 @@ func (a *App) DocGetDoc(docID string) (*docpipeline.Doc, error) {
 }
 
 // DocExport 导出（弹出保存对话框）。kind: translation | bilingual。
-func (a *App) DocExport(docID string, kind string) error {
+// 返回实际写入的路径；用户取消保存对话框时返回空串（前端据此不弹"已导出"）。
+func (a *App) DocExport(docID string, kind string) (string, error) {
 	if err := a.ensureReady(); err != nil {
-		return err
+		return "", err
 	}
 	doc, err := a.docpipe.Get(docID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	text, err := a.docpipe.ExportText(docID, docpipeline.ExportKind(kind))
 	if err != nil {
-		return err
+		return "", err
 	}
 	base := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
 	suffix := ""
@@ -995,12 +1115,15 @@ func (a *App) DocExport(docID string, kind string) error {
 		Filters:         []runtime.FileFilter{{DisplayName: "TXT", Pattern: "*.txt"}},
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if path == "" {
-		return nil // 用户取消
+		return "", nil // 用户取消
 	}
-	return os.WriteFile(path, []byte(text), 0o644)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // loadGlossary 术语本加载（与主翻译台绑定共用 store 读取路径）。

@@ -341,6 +341,24 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class DocPickResult {
+	    path: string;
+	    chars: number;
+	    tooLong: boolean;
+	    unsupported: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocPickResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.chars = source["chars"];
+	        this.tooLong = source["tooLong"];
+	        this.unsupported = source["unsupported"];
+	    }
+	}
 	export class DocRequestUI {
 	    path: string;
 	    direction: string;
@@ -669,6 +687,26 @@ export namespace subtitle {
 	        this.needsCheck = source["needsCheck"];
 	    }
 	}
+	export class CuePatch {
+	    startMs?: number;
+	    endMs?: number;
+	    original?: string;
+	    translated?: string;
+	    styleName?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CuePatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startMs = source["startMs"];
+	        this.endMs = source["endMs"];
+	        this.original = source["original"];
+	        this.translated = source["translated"];
+	        this.styleName = source["styleName"];
+	    }
+	}
 	export class ExportOptions {
 	    format: string;
 	    encoding: string;
@@ -707,7 +745,14 @@ export namespace subtitle {
 	}
 	export class StyleDef {
 	    name: string;
-	    raw: string;
+	    fontName: string;
+	    fontSize: number;
+	    primaryRGB: string;
+	    outlineRGB: string;
+	    outline: number;
+	    bold: boolean;
+	    alignment: number;
+	    marginV: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new StyleDef(source);
@@ -716,7 +761,14 @@ export namespace subtitle {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
-	        this.raw = source["raw"];
+	        this.fontName = source["fontName"];
+	        this.fontSize = source["fontSize"];
+	        this.primaryRGB = source["primaryRGB"];
+	        this.outlineRGB = source["outlineRGB"];
+	        this.outline = source["outline"];
+	        this.bold = source["bold"];
+	        this.alignment = source["alignment"];
+	        this.marginV = source["marginV"];
 	    }
 	}
 	export class SubtitleDoc {

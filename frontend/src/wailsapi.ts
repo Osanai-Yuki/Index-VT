@@ -76,12 +76,25 @@ export const apiSubRetryCues = (docId: string, ids: number[], opt: unknown) => c
 export const apiSubGetDoc = (docId: string) => call<any>('SubGetDoc', docId)
 export const apiSubExport = (docId: string, opt: unknown) => call<void>('SubExport', docId, opt)
 
+// ---------- 字幕编辑（M4） ----------
+export const apiSubUpdateCue = (docId: string, index: number, patch: unknown) => call<any>('SubUpdateCue', docId, index, patch)
+export const apiSubSplitCue = (docId: string, index: number, atMs: number) => call<any>('SubSplitCue', docId, index, atMs)
+export const apiSubMergeCues = (docId: string, fromIndex: number, toIndex: number) => call<any>('SubMergeCues', docId, fromIndex, toIndex)
+export const apiSubShiftAll = (docId: string, deltaMs: number) => call<any>('SubShiftAll', docId, deltaMs)
+export const apiSubCalibrate = (docId: string, anchor1Idx: number, anchor2Idx: number, anchor1Ms: number, anchor2Ms: number) => call<any>('SubCalibrate', docId, anchor1Idx, anchor2Idx, anchor1Ms, anchor2Ms)
+export const apiSubDeleteCues = (docId: string, indices: number[]) => call<any>('SubDeleteCues', docId, indices)
+export const apiSubInsertCue = (docId: string, afterIndex: number) => call<any>('SubInsertCue', docId, afterIndex)
+export const apiSubStyles = (docId: string) => call<any[]>('SubStyles', docId)
+export const apiSubSetStyle = (docId: string, style: unknown) => call<any>('SubSetStyle', docId, style)
+export const apiSubAssignStyle = (docId: string, indices: number[], styleName: string) => call<any>('SubAssignStyle', docId, indices, styleName)
+
 // ---------- 文档翻译（M5） ----------
+export const apiDocPick = () => call<{ path: string; chars: number; tooLong: boolean; unsupported: boolean } | null>('DocPick')
 export const apiDocTranslate = (req: { path: string; direction: string; glossaryId?: number }) => call<string>('DocTranslate', req)
 export const apiDocResume = (docId: string) => call<void>('DocResume', docId)
 export const apiDocCancel = (docId: string) => call<void>('DocCancel', docId)
 export const apiDocGetDoc = (docId: string) => call<any>('DocGetDoc', docId)
-export const apiDocExport = (docId: string, kind: 'translation' | 'bilingual') => call<void>('DocExport', docId, kind)
+export const apiDocExport = (docId: string, kind: 'translation' | 'bilingual') => call<string>('DocExport', docId, kind)
 
 // ---------- 文档 ----------
 export const apiCollectLogs = () => call<string>('CollectLogs')

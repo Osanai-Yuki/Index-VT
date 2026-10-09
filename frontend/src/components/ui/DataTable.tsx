@@ -29,13 +29,15 @@ export interface DataTableProps<T> {
   columns: Column<T>[]
   rows: T[]
   rowKey: (r: T, i: number) => string | number
-  rowHeight?: 32 | 40
+  rowHeight?: 32 | 40 | 56
   /** 默认 rows.length > 200 自动开 */
   virtual?: boolean
   selectable?: boolean
   selected?: Set<string | number>
   onSelectedChange?: (s: Set<string | number>) => void
   onRowClick?: (row: T) => void
+  /** 行右键菜单（M4）：与 onRowClick 同语义，键盘可达由容器承担 */
+  onRowContextMenu?: (e: React.MouseEvent, row: T) => void
   selectedRowKey?: string | number
   emptyState?: ReactNode
   'aria-label': string
@@ -53,6 +55,7 @@ export function DataTable<T>({
   selected,
   onSelectedChange,
   onRowClick,
+  onRowContextMenu,
   selectedRowKey,
   emptyState,
   'aria-label': ariaLabel,
@@ -227,6 +230,10 @@ export function DataTable<T>({
               ? // lint-allow: div-click —— ARIA grid 行 div；键盘可达由容器 Enter/↑↓ 承担（§5.7）
                 { onClick: () => onRowClick(row) }
               : {}
+            const rowContextProps = onRowContextMenu
+              ? // lint-allow: div-contextmenu —— ARIA grid 行 div；右键菜单由容器键盘操作承担
+                { onContextMenu: (e: React.MouseEvent) => onRowContextMenu(e, row) }
+              : {}
             return (
               <div
                 key={key}
@@ -235,6 +242,7 @@ export function DataTable<T>({
                 aria-rowindex={idx + 2}
                 aria-selected={selectable ? isSelected : undefined}
                 {...rowClickProps}
+                {...rowContextProps}
                 className={`${rowCls(isSelected, isActive)} ${onRowClick ? 'cursor-pointer' : ''}`}
                 style={{
                   display: 'grid',

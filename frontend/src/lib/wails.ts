@@ -24,6 +24,8 @@ export const EV = {
   MODEL_PROGRESS: 'model:progress',
   MODELS_UPDATED: 'models:updated',
   CUE: 'subtitle:cue',
+  DOC_PROGRESS: 'doc:progress',
+  DOC_DONE: 'doc:done',
 } as const
 
 /* ALWAYS_ON：模块加载即预挂、永不 EventsOff 的名字（后端可能随时 emit）。

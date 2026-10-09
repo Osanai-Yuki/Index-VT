@@ -1,30 +1,16 @@
 // App 外壳：Rail + 页面 + StatusBar；首次引导覆盖层；退出释放编排。
 import { useEffect, useState } from 'react'
-import { FileText } from 'lucide-react'
 import { Rail } from './components/Rail'
 import { StatusBar } from './components/StatusBar'
 import { ToastHost } from './components/ui/index'
 import { MainTranslate } from './pages/MainTranslate'
 import { SubtitleWorkbench } from './pages/SubtitleWorkbench'
+import { DocTranslatePage } from './pages/DocTranslate'
 import { ModelHub } from './pages/ModelHub'
 import { SettingsPage } from './pages/Settings'
 import { Onboarding } from './pages/Onboarding'
 import { useAppStore, wireEvents, loadInitialConfig } from './stores/appStore'
 import { apiGetLanguages, apiPrepareExit, apiQuit, apiSetConfig } from './wailsapi'
-
-function DocTranslatePlaceholder() {
-  return (
-    <div className="h-full grid place-items-center bg-surface border border-line">
-      <div className="text-center">
-        <FileText size={44} strokeWidth={1.5} className="mx-auto mb-3 text-ink3" aria-hidden="true" />
-        <div className="text-title text-ink2">长文档翻译 · M5 里程碑提供</div>
-        <div className="text-caption text-ink3 mt-1.5">
-          Index-Nailong-2B · zh↔en / zh↔ja · ctx 8K/16K/32K · 全文人名一致性
-        </div>
-      </div>
-    </div>
-  )
-}
 
 export default function App() {
   const page = useAppStore((s) => s.page)
@@ -109,7 +95,7 @@ export default function App() {
         <div key={page} className="h-full screen-in">
           {page === 'translate' && <MainTranslate langs={langs} />}
           {page === 'subtitle' && <SubtitleWorkbench langs={langs} />}
-          {page === 'doc' && <DocTranslatePlaceholder />}
+          {page === 'doc' && <DocTranslatePage />}
           {page === 'model' && <ModelHub />}
           {page === 'settings' && <SettingsPage />}
         </div>

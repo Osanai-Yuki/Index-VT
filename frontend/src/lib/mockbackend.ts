@@ -5,7 +5,7 @@
 // 而不是只能扫陈列页。
 //
 // 只在 import.meta.env.DEV 且 URL 带 ?mock 时由 main.tsx 动态 import —— 生产包不含本模块。
-// 覆盖前端已封装的全部绑定（wailsapi.ts 的 34 个 api*）+ window.runtime 事件三件套。
+// 覆盖 wailsapi.ts 全部 54 个 api* 封装 + 未封装的 ExportGlossaryCSV，共 55 个方法。
 // 未覆盖的方法会 resolve(null) 并在控制台点名一次，方便发现漏配。
 //
 // 参数：
@@ -180,8 +180,22 @@ const unknownModels = () => [
   },
 ]
 
+/* 字幕 cue 形状（对齐 Go subtitle.Cue 的 json tag；
+   omitempty 字段在前端侧为可选——拆分/插入的新条本来就不带它们） */
+interface MockCue {
+  index: number
+  startMs: number
+  endMs: number
+  original: string
+  translated: string
+  styleName?: string
+  state: string
+  offTarget?: boolean
+  needsCheck?: boolean
+}
+
 /* 字幕：48 条 cue，覆盖 done / pending / failed / off-target / needsCheck 各种徽标形态 */
-const cues = () =>
+const cues = (): MockCue[] =>
   Array.from({ length: 48 }, (_, i) => {
     const state = i < 30 ? 'done' : i < 36 ? 'pending' : i < 40 ? 'failed' : 'done'
     return {
@@ -197,7 +211,23 @@ const cues = () =>
     }
   })
 
-const subtitleDoc = () => ({
+/* M4 编辑载体：一份活文档 + 一份样式库。引擎语义是「编辑就地改内存、
+   返回浅拷贝快照」，mock 同样维护活状态——下方 10 个 Sub* 编辑/样式绑定
+   真实改写这份状态，?mock 下编辑路径与真实交互同构（可连续点、结果可见）。
+   SubOpen 重开 = 重置回 48 条样例（引擎语义：新文件即新文档、条目全回 pending）。 */
+interface MockStyle {
+  name: string
+  fontName: string
+  fontSize: number
+  primaryRGB: string
+  outlineRGB: string
+  outline: number
+  bold: boolean
+  alignment: number
+  marginV: number
+}
+
+const newSubDoc = () => ({
   id: 'mock-doc',
   path: 'C:\\subs\\demo.zh.srt',
   format: 'srt',
@@ -205,6 +235,44 @@ const subtitleDoc = () => ({
   cues: cues(),
   queueActive: false, // mock 无真实队列；暂停/继续/取消随之禁用，与空跑行为一致
 })
+let subDoc = newSubDoc()
+
+// ASS 样式库样例（Default / Title 两枚，对齐 cues 的 styleName 引用）
+const newStyles = (): MockStyle[] => [
+  { name: 'Default', fontName: 'Microsoft YaHei', fontSize: 20, primaryRGB: '#FFFFFF', outlineRGB: '#000000', outline: 2, bold: false, alignment: 2, marginV: 30 }, // lint-allow: raw-color —— ASS 样式字段值（假数据），不进界面渲染链
+  { name: 'Title', fontName: 'Microsoft YaHei', fontSize: 28, primaryRGB: '#E60000', outlineRGB: '#000000', outline: 3, bold: true, alignment: 8, marginV: 60 }, // lint-allow: raw-color —— 同上（ASS #RRGGBB 字段值）
+]
+let subStyles = newStyles()
+
+// 快照与引擎同语义：浅拷贝 cue 切片，改动不串扰渲染中的旧快照
+const subSnapshot = () => ({ ...subDoc, cues: [...subDoc.cues] })
+
+// 序号重排（1 起始连续，engine.reindex 同款）
+const reindexSub = () => {
+  subDoc.cues.forEach((c, i) => {
+    c.index = i + 1
+  })
+}
+
+// 按时间占比切文本，就近落空白/标点边界（ engine.splitTextByRatio 同款效果；
+// 扫 ±20% 长度找边界，找不到就在占比位置硬切）
+const splitText = (text: string, ratio: number): [string, string] => {
+  if (!text) return ['', '']
+  const want = Math.round(text.length * ratio)
+  let best = Math.min(Math.max(want, 1), text.length - 1)
+  let bestDist = Infinity
+  const scan = Math.max(1, Math.floor(text.length / 5))
+  for (let i = Math.max(0, want - scan); i <= Math.min(text.length - 1, want + scan); i++) {
+    if (/[\s，。；：、,.;:!？！?]/.test(text[i])) {
+      const dist = Math.abs(i - want)
+      if (dist < bestDist) {
+        bestDist = dist
+        best = i + 1 // 切在标点之后
+      }
+    }
+  }
+  return [text.slice(0, best), text.slice(best).trim()]
+}
 
 /* ── 事件三件套 ─────────────────────────────────────────────── */
 
@@ -230,6 +298,9 @@ const runtime = {
 let warnCount = 0
 
 // 长文档演示流（M5 步 4 的 ?mock&page=doc 用）：两段进度 + 完成事件。
+// docDemoDone 同步进快照：演示完成后 chunk 2 落成 done，否则页面的
+// allDone（全部 done 才出导出按钮）永远为假，「导入→翻译→导出」走不通。
+let docDemoDone = false
 function emitDocDemo(docId: string) {
   const total = 12000
   let done = 0
@@ -243,6 +314,7 @@ function emitDocDemo(docId: string) {
     })
     if (done >= total) {
       clearInterval(timer)
+      docDemoDone = true
       runtime.EventsEmit('doc:done', {
         docId,
         coverage: [{ term: '王妃', translation: 'Queen', sourceChunks: 2, hitChunks: 2 }],
@@ -257,7 +329,7 @@ const mockDocSnapshot = () => ({
   direction: 'zh-en',
   chunks: [
     { index: 1, text: '第一章 白狼河……', translated: 'Chapter 1 The White Wolf River…', state: 'done' },
-    { index: 2, text: '第二年开春……', translated: '', state: 'pending' },
+    { index: 2, text: '第二年开春……', translated: docDemoDone ? 'In the spring of the second year…' : '', state: docDemoDone ? 'done' : 'pending' },
   ],
   charsTotal: 12000,
   queueActive: false,
@@ -354,8 +426,12 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
     return { taskId }
   },
   CancelTask: () => undefined,
-  SubOpen: () => subtitleDoc(),
-  SubGetDoc: () => subtitleDoc(),
+  SubOpen: () => {
+    subDoc = newSubDoc()
+    subStyles = newStyles()
+    return subSnapshot()
+  },
+  SubGetDoc: () => subSnapshot(),
   SubTranslate: () => undefined,
   SubPauseQueue: () => undefined,
   SubResumeQueue: () => undefined,
@@ -363,9 +439,180 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
   SubRetryFailed: () => undefined,
   SubRetryCues: () => undefined,
   SubExport: () => undefined,
+  /* ── M4 字幕编辑（10 个绑定）。越界/非法入参按当前快照原样返回
+        （真实后端走报错路径；mock 保持 resolve，页面不闪退）── */
+  SubUpdateCue: (_docId: never, index: never, patch: never) => {
+    const c = subDoc.cues[(index as unknown as number) - 1]
+    const p = patch as unknown as { startMs?: number; endMs?: number; original?: string; translated?: string; styleName?: string }
+    if (c) {
+      if (p.startMs !== undefined) c.startMs = p.startMs
+      if (p.endMs !== undefined) c.endMs = p.endMs
+      if (p.original !== undefined) {
+        if (c.state === 'done') c.state = 'pending' // 引擎语义：旧译文不再对应新原文
+        c.original = p.original
+      }
+      if (p.translated !== undefined) c.translated = p.translated
+      if (p.styleName !== undefined) c.styleName = p.styleName
+    }
+    return subSnapshot()
+  },
+  SubSplitCue: (_docId: never, index: never, atMs: never) => {
+    const i = (index as unknown as number) - 1
+    const c = subDoc.cues[i]
+    const at = atMs as unknown as number
+    // 引擎校验：拆分点须在 (start, end) 开区间内
+    if (c && at > c.startMs && at < c.endMs) {
+      const ratio = (at - c.startMs) / (c.endMs - c.startMs)
+      const [o1, o2] = splitText(c.original, ratio)
+      const [t1, t2] = splitText(c.translated, ratio)
+      const endMs = c.endMs
+      c.endMs = at
+      c.original = o1
+      c.translated = t1
+      if (c.state === 'done') c.state = 'pending'
+      // 后条继承原样式，在原位后插入并重排（engine.SplitCue 同款）
+      subDoc.cues.splice(i + 1, 0, {
+        index: i + 2,
+        startMs: at,
+        endMs,
+        original: o2,
+        translated: t2,
+        styleName: c.styleName,
+        state: 'pending',
+      })
+      reindexSub()
+    }
+    return subSnapshot()
+  },
+  SubMergeCues: (_docId: never, fromIndex: never, toIndex: never) => {
+    const f = (fromIndex as unknown as number) - 1
+    const t = (toIndex as unknown as number) - 1
+    // 引擎另要求区间首尾相接（prev.endMs == next.startMs）；
+    // 本样例相邻条目间隔 400ms 不相接 —— mock 放宽此项，合并照常发生
+    if (f >= 0 && f < t && t < subDoc.cues.length) {
+      const first = subDoc.cues[f]
+      const origParts: string[] = []
+      const tranParts: string[] = []
+      for (let k = f; k <= t; k++) {
+        const c = subDoc.cues[k]
+        origParts.push(c.original)
+        if (c.translated) tranParts.push(c.translated)
+        if (c.needsCheck) first.needsCheck = true
+      }
+      first.endMs = subDoc.cues[t].endMs
+      first.original = origParts.join(' ')
+      first.translated = tranParts.join(' ')
+      subDoc.cues.splice(f + 1, t - f)
+      reindexSub()
+    }
+    return subSnapshot()
+  },
+  SubShiftAll: (_docId: never, deltaMs: never) => {
+    const d = deltaMs as unknown as number
+    for (const c of subDoc.cues) {
+      c.startMs += d
+      c.endMs += d
+      // 负到 <0 钳到 0 并标 needsCheck（engine.ShiftAll 同款）
+      if (c.startMs < 0) {
+        c.startMs = 0
+        c.needsCheck = true
+      }
+      if (c.endMs < 0) {
+        c.endMs = 0
+        c.needsCheck = true
+      }
+    }
+    return subSnapshot()
+  },
+  SubCalibrate: (_docId: never, anchor1Idx: never, anchor2Idx: never, anchor1Ms: never, anchor2Ms: never) => {
+    const a1 = (anchor1Idx as unknown as number) - 1
+    const a2 = (anchor2Idx as unknown as number) - 1
+    const m1 = anchor1Ms as unknown as number
+    const m2 = anchor2Ms as unknown as number
+    const cs = subDoc.cues
+    if (a1 >= 0 && a1 < cs.length && a2 >= 0 && a2 < cs.length) {
+      const old1 = cs[a1].startMs
+      const old2 = cs[a2].startMs
+      if (old1 === old2) {
+        // 两锚点旧时间重合 → 退化为纯平移（engine.Calibrate 同款）
+        const offset = m1 - old1
+        for (const c of cs) {
+          c.startMs += offset
+          c.endMs += offset
+          if (c.startMs < 0) c.startMs = 0
+          if (c.endMs < 0) c.endMs = 0
+        }
+      } else {
+        const scale = (m2 - m1) / (old2 - old1)
+        const offset = m1 - old1 * scale
+        for (const c of cs) {
+          c.startMs = Math.round(c.startMs * scale + offset)
+          c.endMs = Math.round(c.endMs * scale + offset)
+          if (c.startMs < 0) c.startMs = 0
+          if (c.endMs < 0) c.endMs = 0
+        }
+      }
+      // 校准即人工确认时间轴 → needsCheck 全清
+      for (const c of cs) c.needsCheck = false
+    }
+    return subSnapshot()
+  },
+  SubDeleteCues: (_docId: never, indices: never) => {
+    const doomed = new Set((indices as unknown as number[]).filter((i) => i >= 1 && i <= subDoc.cues.length))
+    if (doomed.size > 0) {
+      subDoc.cues = subDoc.cues.filter((c) => !doomed.has(c.index))
+      reindexSub()
+    }
+    return subSnapshot()
+  },
+  SubInsertCue: (_docId: never, afterIndex: never) => {
+    const after = afterIndex as unknown as number
+    // afterIndex=0 表示在开头插入；新条为 2s 空白、state=pending
+    if (after >= 0 && after <= subDoc.cues.length) {
+      const startMs = after === 0 ? 0 : subDoc.cues[after - 1].endMs
+      subDoc.cues.splice(after, 0, {
+        index: after + 1,
+        startMs,
+        endMs: startMs + 2000,
+        original: '',
+        translated: '',
+        state: 'pending',
+      })
+      reindexSub()
+    }
+    return subSnapshot()
+  },
+  SubStyles: () => [...subStyles],
+  SubSetStyle: (_docId: never, style: never) => {
+    const s = style as unknown as MockStyle
+    // 按 Name upsert（engine.SetStyle 同款；Raw 重建是真实后端的事，mock 无 Raw 概念）
+    if (s && s.name) {
+      const at = subStyles.findIndex((x) => x.name === s.name)
+      if (at >= 0) subStyles[at] = { ...subStyles[at], ...s }
+      else subStyles = [...subStyles, { ...s }]
+    }
+    return subSnapshot()
+  },
+  SubAssignStyle: (_docId: never, indices: never, styleName: never) => {
+    const name = styleName as unknown as string
+    for (const i of indices as unknown as number[]) {
+      const c = subDoc.cues[i - 1]
+      if (c) c.styleName = name
+    }
+    return subSnapshot()
+  },
+  DocPick: () => ({
+    // mock 没有系统文件对话框：固定回一份可读样例，
+    // 「导入文档」在 ?mock 下可走完整个流程（导入 → 开始翻译 → 进度 → 导出）
+    path: 'C:\\docs\\novel.zh.txt',
+    chars: 9876,
+    tooLong: false,
+    unsupported: false,
+  }),
   DocTranslate: (req: never) => {
     const r = req as unknown as { path?: string }
     void r
+    docDemoDone = false // 重跑演示时回到「翻译中」快照
     setTimeout(() => emitDocDemo('mock-doc-1'), 100)
     return 'mock-doc-1'
   },
