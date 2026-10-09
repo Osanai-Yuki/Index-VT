@@ -985,8 +985,11 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
               kind="primary"
               data-modal-initial="confirm"
               onClick={() => {
-                const ms = Number(calibrateInputRef.current?.value)
-                if (edit.calibrateModal && edit.calibrateAnchor1 && !isNaN(ms)) {
+                // 空输入必须当非法：Number('') === 0 会绕过 isNaN 守卫，
+                // 把两点校准的第二锚点当 0ms 执行——整条时间轴被压坏（真机回归抓到）。
+                const raw = calibrateInputRef.current?.value.trim() ?? ''
+                const ms = Number(raw)
+                if (edit.calibrateModal && edit.calibrateAnchor1 && raw !== '' && Number.isFinite(ms) && ms >= 0) {
                   doCalibrate(edit.calibrateAnchor1.index, edit.calibrateAnchor1.ms, edit.calibrateModal.index, ms)
                   setEdit((ed) => ({ ...ed, calibrateMode: 0, calibrateAnchor1: null, calibrateModal: null }))
                 }
@@ -1007,8 +1010,9 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           className="bg-sunken border border-line text-ink1 px-3 py-2 text-body w-full"
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              const ms = Number((e.target as HTMLInputElement).value)
-              if (edit.calibrateModal && edit.calibrateAnchor1 && !isNaN(ms)) {
+              const raw = (e.target as HTMLInputElement).value.trim()
+              const ms = Number(raw)
+              if (edit.calibrateModal && edit.calibrateAnchor1 && raw !== '' && Number.isFinite(ms) && ms >= 0) {
                 doCalibrate(edit.calibrateAnchor1.index, edit.calibrateAnchor1.ms, edit.calibrateModal.index, ms)
                 setEdit((ed) => ({ ...ed, calibrateMode: 0, calibrateAnchor1: null, calibrateModal: null }))
               }
