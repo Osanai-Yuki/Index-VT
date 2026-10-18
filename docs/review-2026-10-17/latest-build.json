@@ -1,0 +1,14 @@
+{
+  "phase": "remaining-fixes",
+  "path": "app/build/bin/Index-VT.exe",
+  "bytes": 20822528,
+  "mtime": "2026-10-17T15:10:25.675Z",
+  "sha256": "2616215d4f92f7e1d5f60f8808b4efa3bf6779dbb3db81617508f3950050d670",
+  "verifiedEmbeddedAssets": [
+    "geist-mono-latin-wght400-500-BUpMemCO.woff2",
+    "index-CgWA_HcC.css",
+    "index-tY0e6LxT.js",
+    "noto-sans-sc-cjk-wght400-600-BW3KsRh3.woff2",
+    "public-sans-latin-wght400-600-Bmpfeiuh.woff2"
+  ]
+}

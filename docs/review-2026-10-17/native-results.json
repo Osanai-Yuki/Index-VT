@@ -1,0 +1,6 @@
+{
+  "started": "2026-10-17T13:53:10.664Z",
+  "checks": [],
+  "ok": false,
+  "error": "Error: WebView2 debug endpoint unavailable\n    at file:///E:/Code_Projects/Go/Index-VT_GUI/frontend/scripts/verify-native.mjs:23:24"
+}

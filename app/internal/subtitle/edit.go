@@ -28,8 +28,9 @@ type CuePatch struct {
 // checkQueueActive 检查文档是否有进行中的翻译队列。
 func (e *Engine) checkQueueActive(docID string) error {
 	if _, busy := e.queueCancel[docID]; busy {
-		return fmt.Errorf("队列进行中，先暂停或取消再编辑（文档 %s）", docID)
+		return fmt.Errorf("队列进行中，请先取消队列再编辑（文档 %s）", docID)
 	}
+	e.editBefore[docID] = e.snapshotLocked(e.docs[docID])
 	return nil
 }
 
@@ -131,10 +132,18 @@ func (e *Engine) UpdateCue(docID string, index int, patch CuePatch) (*SubtitleDo
 	}
 	if patch.Translated != nil {
 		c.Translated = *patch.Translated
+		if strings.TrimSpace(c.Translated) == "" {
+			c.State = CuePending
+		} else {
+			c.State = CueDone
+		}
+		c.OffTarget = false
+		c.NeedsCheck = false
 	}
 	if patch.StyleName != nil {
 		c.StyleName = *patch.StyleName
 	}
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -186,6 +195,7 @@ func (e *Engine) SplitCue(docID string, index int, atMs int64) (*SubtitleDoc, er
 	copy(doc.Cues[index:], doc.Cues[index-1:])
 	doc.Cues[index] = newCue
 	reindex(doc.Cues)
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -235,6 +245,7 @@ func (e *Engine) MergeCues(docID string, fromIndex, toIndex int) (*SubtitleDoc, 
 	doc.Cues = append(doc.Cues[:fromIndex], doc.Cues[toIndex:]...)
 	_ = deleteCount
 	reindex(doc.Cues)
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -262,6 +273,7 @@ func (e *Engine) ShiftAll(docID string, deltaMs int64) (*SubtitleDoc, error) {
 			doc.Cues[i].NeedsCheck = true
 		}
 	}
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -315,6 +327,7 @@ func (e *Engine) Calibrate(docID string, anchor1Idx, anchor2Idx int, anchor1Ms, 
 	for i := range doc.Cues {
 		doc.Cues[i].NeedsCheck = false
 	}
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -350,6 +363,7 @@ func (e *Engine) DeleteCues(docID string, indices []int) (*SubtitleDoc, error) {
 	}
 	doc.Cues = filtered
 	reindex(doc.Cues)
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -385,6 +399,7 @@ func (e *Engine) InsertCue(docID string, afterIndex int) (*SubtitleDoc, error) {
 	copy(doc.Cues[afterIndex+1:], doc.Cues[afterIndex:])
 	doc.Cues[afterIndex] = newCue
 	reindex(doc.Cues)
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -430,6 +445,7 @@ func (e *Engine) SetStyle(docID string, style StyleDef) (*SubtitleDoc, error) {
 	if !found {
 		doc.Styles = append(doc.Styles, style)
 	}
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }
@@ -451,6 +467,7 @@ func (e *Engine) AssignStyle(docID string, indices []int, styleName string) (*Su
 		}
 		doc.Cues[idx-1].StyleName = styleName
 	}
+	e.rememberEditLocked(docID)
 	e.touchLocked(docID)
 	return e.snapshotLocked(doc), nil
 }

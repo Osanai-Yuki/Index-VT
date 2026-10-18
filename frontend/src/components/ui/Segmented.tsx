@@ -20,6 +20,7 @@ export interface SegmentedProps<T extends string> {
   onChange: (v: T) => void
   size?: ButtonSize
   optionMeta?: Readonly<Partial<Record<T, SegmentedOptionMeta>>>
+  disabled?: boolean
   'aria-label': string
 }
 
@@ -35,11 +36,12 @@ export function Segmented<T extends string>({
   onChange,
   size = 'md',
   optionMeta,
+  disabled = false,
   'aria-label': ariaLabel,
 }: SegmentedProps<T>) {
   const refs = useRef(new Map<T, HTMLButtonElement>())
   const metaOf = (opt: T): SegmentedOptionMeta | undefined => optionMeta?.[opt]
-  const isEnabled = (opt: T) => !(metaOf(opt)?.disabled && opt !== value)
+  const isEnabled = (opt: T) => !disabled && !(metaOf(opt)?.disabled && opt !== value)
 
   const moveTo = (target: T | undefined) => {
     if (target === undefined) return
@@ -48,6 +50,7 @@ export function Segmented<T extends string>({
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return
     const n = options.length
     const idx = options.indexOf(value)
     const stepFrom = (start: number, dir: 1 | -1) => {
@@ -82,15 +85,15 @@ export function Segmented<T extends string>({
       {options.map((opt) => {
         const selected = opt === value
         const meta = metaOf(opt)
-        const disabled = Boolean(meta?.disabled) && !selected
+        const optDisabled = disabled || (Boolean(meta?.disabled) && !selected)
         return (
           <button
             key={opt}
             type="button"
             role="radio"
             aria-checked={selected}
-            aria-disabled={disabled || undefined}
-            disabled={disabled}
+            aria-disabled={optDisabled || undefined}
+            disabled={optDisabled}
             title={meta?.title}
             tabIndex={selected ? 0 : -1}
             ref={(el) => {
@@ -99,11 +102,11 @@ export function Segmented<T extends string>({
             }}
             onClick={() => onChange(opt)}
             className={`h-full rounded-sm px-3 text-body font-medium transition-colors duration-(--suj-dur-quick) ease-(--suj-ease-signature) ${
-              disabled ? 'text-ink3' : selected ? 'bg-surface text-ink1 e-1' : 'text-ink2 hover:text-ink1'
+              optDisabled ? 'text-ink3' : selected ? 'bg-surface text-ink1 e-1' : 'text-ink2 hover:text-ink1'
             }`}
           >
             {opt}
-            {meta?.badge && !disabled && (
+            {meta?.badge && !optDisabled && (
               // 徽标用实底反色字（同 Badge accent 档）：红系字直接落在深浅底上都拉不开 4.5:1
               <span className="ml-1.5 inline-flex h-3.5 items-center rounded-full bg-accent px-1 text-micro font-medium leading-none text-inkInverse">
                 {meta.badge}

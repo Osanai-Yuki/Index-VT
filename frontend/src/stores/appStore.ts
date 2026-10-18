@@ -5,6 +5,12 @@ import { create } from 'zustand'
 import { apiGetSystemStatus, apiGetConfig } from '../wailsapi'
 import { on, EV } from '../lib/wails'
 
+let orchestrationRevision = 0
+export function noteUserActivity() {
+  orchestrationRevision++
+  useAppStore.setState({ idleReleaseSeconds: -1 })
+}
+
 export type Page = 'translate' | 'subtitle' | 'doc' | 'model' | 'settings'
 
 interface AppState {
@@ -22,6 +28,8 @@ interface AppState {
 
   orchState: string // idle | starting | running | stopping | crashed
   notice: string | null
+  idleReleaseSeconds: number
+  pageTasks: Partial<Record<Page, boolean>>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -33,9 +41,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   status: null,
   refreshStatus: async () => {
+    const revision = orchestrationRevision
     try {
       const s = await apiGetSystemStatus()
-      set({ status: s, orchState: s.orchestration })
+      set({ status: s, ...(revision === orchestrationRevision ? { orchState: s.orchestration, idleReleaseSeconds: s.idleReleaseSeconds ?? -1 } : {}) })
       if (s.offline === false && get().cfg === null) {
         /* noop */
       }
@@ -49,16 +58,28 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   orchState: 'idle',
   notice: null,
+  idleReleaseSeconds: -1,
+  pageTasks: {},
 }))
 
 // 订阅后端事件（App.tsx 挂载时调用一次）
 export function wireEvents() {
-  on(EV.ORCH, (ev) => {
-    const e = ev as { kind?: string; state?: string; text?: string }
+  const offOrch = on(EV.ORCH, (ev) => {
+    const e = ev as { kind?: string; state?: string; text?: string; extra?: { remainingSeconds?: number } }
+    orchestrationRevision++
     if (e?.kind === 'state') {
       useAppStore.setState({ orchState: e.state ?? 'idle' })
+      if (e.state !== 'running') useAppStore.setState({ idleReleaseSeconds: -1 })
     }
     if (e?.kind === 'notice') {
+      if (e.text === 'idle-warning') {
+        useAppStore.setState({ idleReleaseSeconds: e.extra?.remainingSeconds ?? 30 })
+        return
+      }
+      if (e.text === 'idle-reset' || e.text === 'idle-unload') {
+        useAppStore.setState({ idleReleaseSeconds: -1 })
+        return
+      }
       useAppStore.setState({ notice: e.text ?? null })
       const text = e.text
       setTimeout(() => {
@@ -67,10 +88,11 @@ export function wireEvents() {
     }
   })
   // 模型进度 / 列表变化 → 触发状态刷新（页面自行监听明细事件）
-  on(EV.MODEL_PROGRESS, () => useAppStore.getState().refreshStatus())
-  on(EV.MODELS_UPDATED, () => useAppStore.getState().refreshStatus())
+  const offProgress = on(EV.MODEL_PROGRESS, () => useAppStore.getState().refreshStatus())
+  const offModels = on(EV.MODELS_UPDATED, () => useAppStore.getState().refreshStatus())
   // 5s 轮询兜底（空闲倒计时/VRAM 需要周期刷新）
-  setInterval(() => useAppStore.getState().refreshStatus(), 5000)
+  const timer = setInterval(() => useAppStore.getState().refreshStatus(), 5000)
+  return () => { offOrch(); offProgress(); offModels(); clearInterval(timer) }
 }
 
 export async function loadInitialConfig() {

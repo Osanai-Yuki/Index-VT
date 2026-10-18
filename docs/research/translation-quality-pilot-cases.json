@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "purpose": "原创诊断集：验证词义、逻辑与表达，不用于证明专业级水平",
+  "source_language": "en",
+  "target_language": "zh",
+  "generation_fields": ["id", "source_language", "target_language", "text"],
+  "evaluation_only_fields": ["checks", "reviewer_notes"],
+  "reviewer_notes": "检查点不得进入生成提示词。两个成员必须属于同一数据划分。接受合理同义表达，不做单一参考译文的逐字匹配；这是已公开的诊断集，不能作为无泄漏测试集。",
+  "groups": [
+    {
+      "id": "G01",
+      "challenge": "corporation 的历史与商业词义",
+      "cases": [
+        {"id": "G01-A", "text": "In this account of medieval institutions, corporations include guilds, universities, and religious communities. Their rules influenced political representation.", "checks": ["corporations 指广义组织或法人团体，不统一限为商业公司", "保留三个例子及其与政治代表制度的关系"]},
+        {"id": "G01-B", "text": "The corporation reported higher quarterly profits and paid a dividend to its shareholders.", "checks": ["这里是商业公司，不机械套用历史语境词义", "保留季度利润上升及向股东分红两项信息"]}
+      ]
+    },
+    {
+      "id": "G02",
+      "challenge": "stakes 的习语与字面义",
+      "cases": [
+        {"id": "G02-A", "text": "The stakes are high: a wrongful conviction could cost an innocent person years of freedom.", "checks": ["表达事关重大，不添加具体赌局", "could 的可能性与无辜者失去自由的后果均保留"]},
+        {"id": "G02-B", "text": "At this poker table, the stakes are high: the minimum bet is ten thousand dollars.", "checks": ["保留真实扑克下注情境", "最低下注金额与币种准确"]}
+      ]
+    },
+    {
+      "id": "G03",
+      "challenge": "ventures 不必是创业",
+      "cases": [
+        {"id": "G03-A", "text": "The village organized shared ventures, including repairing the bridge and maintaining the communal well.", "checks": ["ventures 为共同活动或事务，不凭空变成创业", "保留修桥与维护公共水井"]},
+        {"id": "G03-B", "text": "The fund invests in new commercial ventures founded by first-time entrepreneurs.", "checks": ["此处有明确商业创业语境", "保留基金投资、创业者首次创业的限定"]}
+      ]
+    },
+    {
+      "id": "G04",
+      "challenge": "时间范围与可企及性",
+      "cases": [
+        {"id": "G04-A", "text": "The story was invented when victory was already within reach.", "checks": ["胜利当时已可企及或近在眼前", "不能扩大成胜利之前的任意时间"]},
+        {"id": "G04-B", "text": "The story was invented long before victory seemed possible.", "checks": ["编造时胜利远未显得可能", "不套用近在眼前的解释"]}
+      ]
+    },
+    {
+      "id": "G05",
+      "challenge": "情态强度",
+      "cases": [
+        {"id": "G05-A", "text": "Under this rule, we will fail to convict some people who are guilty.", "checks": ["保留 will 的判断强度，不无依据增加可能", "保留部分有罪者未被定罪的范围"]},
+        {"id": "G05-B", "text": "Under this rule, we may fail to convict some people who are guilty.", "checks": ["保留 may 的可能性，不改为必然", "与 G05-A 的强度差别可辨识"]}
+      ]
+    },
+    {
+      "id": "G06",
+      "challenge": "多数决与全体一致",
+      "cases": [
+        {"id": "G06-A", "text": "A majority is sufficient to approve the motion; unanimity is not required.", "checks": ["多数同意足以通过，不需全体一致", "不只逐字输出多数的充分性而使关系不清"]},
+        {"id": "G06-B", "text": "A majority is not sufficient to approve the motion; unanimity is required.", "checks": ["多数同意不足，必须全体一致", "两个否定范围均正确"]}
+      ]
+    },
+    {
+      "id": "G07",
+      "challenge": "代表决定的约束效力",
+      "cases": [
+        {"id": "G07-A", "text": "The delegate's decision binds the group she represents, even if some members disagree.", "checks": ["约束效力作用于被代表群体", "不改成代表强迫成员赞同", "保留部分成员不同意也受约束的条件"]},
+        {"id": "G07-B", "text": "The delegate's recommendation does not bind the group she represents, even if most members support it.", "checks": ["建议没有约束效力", "多数支持不改变其无约束性质"]}
+      ]
+    },
+    {
+      "id": "G08",
+      "challenge": "关联与因果",
+      "cases": [
+        {"id": "G08-A", "text": "The study found an association between the policy and lower costs, but did not establish that the policy caused the reduction.", "checks": ["关联不等于已证实因果", "保留研究并未确立因果的限制"]},
+        {"id": "G08-B", "text": "The report claims that the policy caused the reduction in costs; the authors present this as a causal conclusion.", "checks": ["因果结论属于报告作者的主张", "不自行弱化为仅有关联", "不将作者主张无归因地写成译者认可的事实"]}
+      ]
+    },
+    {
+      "id": "G09",
+      "challenge": "否定与数量范围",
+      "cases": [
+        {"id": "G09-A", "text": "Not all members who received the notice attended the meeting.", "checks": ["并非所有收到通知的成员都参加", "不能写成所有成员均未参加"]},
+        {"id": "G09-B", "text": "None of the members who received the notice attended the meeting.", "checks": ["收到通知的成员中无人参加", "不能弱化为仅部分未参加"]}
+      ]
+    },
+    {
+      "id": "G10",
+      "challenge": "技术概念随语境变化",
+      "cases": [
+        {"id": "G10-A", "text": "The transformer converts the high voltage to a lower voltage before power reaches the instrument.", "checks": ["transformer 为电气设备变压器", "保留先降压再向仪器供电的顺序"]},
+        {"id": "G10-B", "text": "The transformer uses self-attention to process the token sequence. The implementation is written in PyTorch.", "checks": ["transformer 为模型架构，不译为变压器", "保留自注意力、token 序列与 PyTorch 产品名称"]}
+      ]
+    },
+    {
+      "id": "G11",
+      "challenge": "代词消歧与原有歧义保留",
+      "cases": [
+        {"id": "G11-A", "text": "Mira gave Lena the key because Lena had lost hers. Mira kept the spare.", "checks": ["丢钥匙的是 Lena", "交钥匙和保留备用钥匙的是 Mira"]},
+        {"id": "G11-B", "text": "Mira told Lena that her key had been found.", "checks": ["原文没有唯一确定 her 的指向", "不凭空锁定钥匙所有者，允许保留歧义"]}
+      ]
+    },
+    {
+      "id": "G12",
+      "challenge": "断行整理与真实连字符",
+      "cases": [
+        {"id": "G12-A", "text": "The rules influenced the evolution of political institu-\ntions across the region.", "checks": ["识别 institutions 的断行，不把残词当作专名或漏掉", "保留整个地区这一范围"]},
+        {"id": "G12-B", "text": "The committee proposed a long-\nterm plan. Keep the filename `long-term-plan_v2.md` unchanged.", "checks": ["long-term 的真实连字符不应被盲目消除", "文件名 long-term-plan_v2.md 逐字保留"]}
+      ]
+    }
+  ]
+}

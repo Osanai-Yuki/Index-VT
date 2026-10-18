@@ -95,7 +95,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const dlPct = dl?.bytesTotal > 0 ? Math.round((dl.bytesDone / dl.bytesTotal) * 100) : 0
 
   return (
-    <div className="h-full grid place-items-center overflow-auto">
+    <div role="main" className="h-full grid place-items-center overflow-auto">
+      <h1 className="sr-only">Index-VT 首次设置</h1>
       <div className="w-160 bg-surface border border-line shadow-(--suj-e-3) overflow-hidden">
         {/* 步骤条 */}
         <div className="flex items-center px-7 pt-5 pb-4 border-b border-line">

@@ -13,13 +13,17 @@ import (
 // ============================================================================
 
 type queueCtl struct {
-	cancel  context.CancelFunc
-	paused  chan struct{}
-	resume  chan struct{}
+	cancel   context.CancelFunc
+	isPaused bool // e.mu 保护；暂停不打断当前条，停止推进下一条
+	resume   chan struct{}
 }
 
 // TranslateQueue 启动逐条翻译队列。
 func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(CueProgress)) error {
+	return e.translateQueue(docID, opt, onProgress, nil)
+}
+
+func (e *Engine) translateQueue(docID string, opt QueueOptions, onProgress func(CueProgress), prepare func(*SubtitleDoc) error) error {
 	e.mu.Lock()
 	doc, ok := e.docs[docID]
 	if !ok {
@@ -34,6 +38,12 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 		e.mu.Unlock()
 		return fmt.Errorf("翻译服务不可用")
 	}
+	if prepare != nil {
+		if err := prepare(doc); err != nil {
+			e.mu.Unlock()
+			return err
+		}
+	}
 	// Full（整卷重翻，来自「全部翻译」按钮）：done/failed 一并重置为 pending——
 	// 目标语言选错后重翻必须覆盖已翻过的条目，否则同一文档混着两轮语言的译文。
 	// skipped 保留不动：空行跳过与语言无关。重试路径（RetryFailed/RetryCues）
@@ -46,17 +56,21 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, glossaryContextKey{}, append([]GlossaryTerm(nil), opt.Terms...))
 	ctl := &queueCtl{
 		cancel: cancel,
-		paused: make(chan struct{}, 1),
 		resume: make(chan struct{}, 1),
 	}
 	e.queueCancel[docID] = ctl
+	doc.Revision++
+	delete(e.undo, docID)
+	delete(e.redo, docID)
+	delete(e.editBefore, docID)
 	// 只取 pending/failed（重试场景只重跑 failed 由 RetryCue 保证）
 	var targets []int
 	for i := range doc.Cues {
 		c := &doc.Cues[i]
-		if c.State == CuePending || c.State == CueFailed {
+		if (c.State == CuePending || c.State == CueFailed) && (opt.targets == nil || opt.targets[c.Index]) {
 			targets = append(targets, i)
 			c.State = CuePending
 		}
@@ -67,6 +81,12 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 		defer func() {
 			cancel() // B6：正常结束也必须释放，否则每跑一次队列泄漏一个 ctx
 			e.mu.Lock()
+			for _, index := range targets {
+				if doc.Cues[index].State == CueTranslating {
+					doc.Cues[index].State = CuePending
+					doc.Revision++
+				}
+			}
 			delete(e.queueCancel, docID)
 			e.mu.Unlock()
 		}()
@@ -87,6 +107,9 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 			onProgress(q)
 		}
 		emit := func(p CueProgress) {
+			e.mu.Lock()
+			p.Revision = doc.Revision
+			e.mu.Unlock()
 			if onProgress == nil {
 				return
 			}
@@ -112,28 +135,35 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 		// 时最后一条 translating 也会被冲出，且发生在删除 queueCancel 之前。
 		defer flushPending()
 		for _, idx := range targets {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ctl.paused:
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				e.mu.Lock()
+				paused := ctl.isPaused
+				e.mu.Unlock()
+				if !paused {
+					break
+				}
 				select {
 				case <-ctx.Done():
 					return
 				case <-ctl.resume:
 				}
-			default:
 			}
 			e.mu.Lock()
 			cue := &doc.Cues[idx]
 			rawText := cue.Original
 			if strings.TrimSpace(rawText) == "" {
 				cue.State = CueSkipped
+				doc.Revision++
 				e.mu.Unlock()
 				done++ // B2（跳过分支同序）：先计数再 emit，totals 保持一致
 				emit(CueProgress{CueIndex: cue.Index, State: CueSkipped})
 				continue
 			}
 			cue.State = CueTranslating
+			doc.Revision++
 			e.mu.Unlock()
 			emit(CueProgress{CueIndex: cue.Index, State: CueTranslating})
 
@@ -172,6 +202,7 @@ func (e *Engine) TranslateQueue(docID string, opt QueueOptions, onProgress func(
 				cue.NeedsCheck = needsCheck
 			}
 			// 不变量（spec §7.2）：持锁期间不 emit。所需值先在锁内拷成局部值，
+			doc.Revision++
 			// 解锁后不得再经 cue 指针读取 doc.Cues（B3：与快照/其它写者竞争）。
 			p := CueProgress{
 				CueIndex:   cue.Index,
@@ -207,26 +238,24 @@ func offTargetCheck(text, lang string) bool {
 // PauseQueue 暂停队列。
 func (e *Engine) PauseQueue(docID string) error {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	ctl, ok := e.queueCancel[docID]
-	e.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("文档 %s 无进行中队列", docID)
 	}
-	select {
-	case ctl.paused <- struct{}{}:
-	default:
-	}
+	ctl.isPaused = true
 	return nil
 }
 
 // ResumeQueue 恢复队列。
 func (e *Engine) ResumeQueue(docID string) error {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	ctl, ok := e.queueCancel[docID]
-	e.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("文档 %s 无进行中队列", docID)
 	}
+	ctl.isPaused = false
 	select {
 	case ctl.resume <- struct{}{}:
 	default:
@@ -259,45 +288,40 @@ func (e *Engine) CancelAllQueues() {
 
 // RetryFailed 对 failed 条目重新排队（F-19 语义：只取 failed 子集）。
 func (e *Engine) RetryFailed(docID string, opt QueueOptions, onProgress func(CueProgress)) error {
-	e.mu.Lock()
-	doc, ok := e.docs[docID]
-	if !ok {
-		e.mu.Unlock()
-		return fmt.Errorf("文档 %s 不存在", docID)
-	}
-	n := 0
-	for i := range doc.Cues {
-		if doc.Cues[i].State == CueFailed {
-			doc.Cues[i].State = CuePending
-			n++
+	opt.Full = false
+	opt.targets = map[int]bool{}
+	return e.translateQueue(docID, opt, onProgress, func(doc *SubtitleDoc) error {
+		count := 0
+		for i := range doc.Cues {
+			if doc.Cues[i].State == CueFailed {
+				count++
+				opt.targets[doc.Cues[i].Index] = true
+			}
 		}
-	}
-	e.mu.Unlock()
-	if n == 0 {
-		return fmt.Errorf("没有失败条目")
-	}
-	opt.Full = false // 重试语义只覆盖 failed 子集，不接受调用方误传整卷重翻
-	return e.TranslateQueue(docID, opt, onProgress)
+		if count == 0 {
+			return fmt.Errorf("没有失败条目")
+		}
+		return nil
+	})
 }
 
 // RetryCues 重译指定条目。
 func (e *Engine) RetryCues(docID string, cueIdx []int, opt QueueOptions, onProgress func(CueProgress)) error {
-	e.mu.Lock()
-	doc, ok := e.docs[docID]
-	if !ok {
-		e.mu.Unlock()
-		return fmt.Errorf("文档 %s 不存在", docID)
-	}
-	for _, i := range cueIdx {
-		for j := range doc.Cues {
-			if doc.Cues[j].Index == i {
-				doc.Cues[j].State = CuePending
-				// 不清空 Translated：重译失败时用户仍能看到上一版结果（B5）。
-				// 成功路径会覆写译文，预先清空只会让失败的重译永久丢失已有结果。
+	opt.Full = false
+	opt.targets = map[int]bool{}
+	return e.translateQueue(docID, opt, onProgress, func(doc *SubtitleDoc) error {
+		for _, index := range cueIdx {
+			if index < 1 || index > len(doc.Cues) {
+				return fmt.Errorf("字幕序号%d不存在", index)
 			}
 		}
-	}
-	e.mu.Unlock()
-	opt.Full = false // 同 RetryFailed：指定条目重译不接受 Full
-	return e.TranslateQueue(docID, opt, onProgress)
+		if len(cueIdx) == 0 {
+			return fmt.Errorf("请选择需要重译的条目")
+		}
+		for _, index := range cueIdx {
+			doc.Cues[index-1].State = CuePending
+			opt.targets[index] = true
+		}
+		return nil
+	})
 }

@@ -41,10 +41,13 @@ type Doc struct {
 // SourceChunks = 原文含该术语的块数；HitChunks = 其中译文按 canonical 译名命中的块数。
 // 竞争形式的模糊归一 v1 不做，未命中清单由人工看（度量先闭环，精度 v2 迭代）。
 type TermCoverage struct {
-	Term         string `json:"term"`
-	Translation  string `json:"translation"`
-	SourceChunks int    `json:"sourceChunks"`
-	HitChunks    int    `json:"hitChunks"`
+	Term              string `json:"term"`
+	Translation       string `json:"translation"`
+	SourceChunks      int    `json:"sourceChunks"`
+	HitChunks         int    `json:"hitChunks"`
+	SourceOccurrences int    `json:"sourceOccurrences"`
+	TargetOccurrences int    `json:"targetOccurrences"`
+	MissingChunks     []int  `json:"missingChunks,omitempty"`
 }
 
 // DocDone 完成事件载荷（app 层转 doc:done Wails 事件）。
@@ -84,6 +87,8 @@ func NewEngine(translate TranslateFunc) *Engine {
 		translate: translate,
 	}
 }
+
+func (e *Engine) HasActiveQueue() bool { e.mu.Lock(); defer e.mu.Unlock(); return len(e.cancel) > 0 }
 
 // Open 解析文本并建块（不启动翻译）。空文本 / 超上限 / 方向非法即拒绝。
 // maxChars=0 表示不设上限（测试用）；生产入口传 50000（§10 决策 5）。
@@ -126,6 +131,14 @@ func (e *Engine) Open(path, text string, dir translator.NailongDirection, glossa
 // Run 启动/续跑：只翻译 pending/failed 块，done 保留（§10 决策 3 的取消续跑语义）。
 // onProgress 在每块终态与启动时回调；onDone 恰好回调一次（含取消/出错）。
 func (e *Engine) Run(docID string, onProgress func(DocProgress), onDone func(DocDone)) error {
+	return e.run(docID, onProgress, onDone, false)
+}
+
+func (e *Engine) Restart(docID string, onProgress func(DocProgress), onDone func(DocDone)) error {
+	return e.run(docID, onProgress, onDone, true)
+}
+
+func (e *Engine) run(docID string, onProgress func(DocProgress), onDone func(DocDone), full bool) error {
 	e.mu.Lock()
 	doc, ok := e.docs[docID]
 	if !ok {
@@ -137,6 +150,13 @@ func (e *Engine) Run(docID string, onProgress func(DocProgress), onDone func(Doc
 		return fmt.Errorf("该文档队列已在进行中")
 	}
 	var targets []int
+	if full {
+		for i := range doc.Chunks {
+			doc.Chunks[i].State = "pending"
+			doc.Chunks[i].Translated = ""
+		}
+		doc.Coverage = nil
+	}
 	for i := range doc.Chunks {
 		if doc.Chunks[i].State == "pending" || doc.Chunks[i].State == "failed" {
 			targets = append(targets, i)
@@ -147,12 +167,7 @@ func (e *Engine) Run(docID string, onProgress func(DocProgress), onDone func(Doc
 	e.mu.Unlock()
 
 	go func() {
-		defer func() {
-			cancel()
-			e.mu.Lock()
-			delete(e.cancel, docID)
-			e.mu.Unlock()
-		}()
+		defer cancel()
 		errMsg := ""
 		canceled := false
 		for _, idx := range targets {
@@ -193,6 +208,7 @@ func (e *Engine) Run(docID string, onProgress func(DocProgress), onDone func(Doc
 		e.mu.Lock()
 		coverage := e.coverageLocked(doc)
 		doc.Coverage = coverage
+		delete(e.cancel, docID) // 终态事件前队列必须已结束，快照和立即续跑才一致。
 		e.mu.Unlock()
 		if onDone != nil {
 			onDone(DocDone{DocID: docID, Error: errMsg, Canceled: canceled, Coverage: coverage})
@@ -292,21 +308,33 @@ func (e *Engine) ExportText(docID string, kind ExportKind) (string, error) {
 		return "", fmt.Errorf("文档 %s 不存在", docID)
 	}
 	var b strings.Builder
+	partial := strings.HasSuffix(string(kind), "-partial")
+	if partial {
+		kind = ExportKind(strings.TrimSuffix(string(kind), "-partial"))
+		if e.charsDoneLocked(d) == 0 {
+			return "", fmt.Errorf("尚无已完成块可导出")
+		}
+		b.WriteString("[部分结果：未完成块已标记，请勿作为完成稿]\n\n")
+	}
 	switch kind {
 	case ExportTranslation:
 		for i := range d.Chunks {
-			if d.Chunks[i].State != "done" {
+			if d.Chunks[i].State != "done" && !partial {
 				return "", fmt.Errorf("块 %d 未完成（%s），导出前需整卷翻译完成", d.Chunks[i].Index, d.Chunks[i].State)
 			}
 			if i > 0 {
 				b.WriteString("\n\n")
 			}
-			b.WriteString(d.Chunks[i].Translated)
+			if d.Chunks[i].State == "done" {
+				b.WriteString(d.Chunks[i].Translated)
+			} else {
+				fmt.Fprintf(&b, "[块 %d 未完成：%s]", d.Chunks[i].Index, d.Chunks[i].State)
+			}
 		}
 	case ExportBilingual:
 		for i := range d.Chunks {
 			ch := &d.Chunks[i]
-			if ch.State != "done" {
+			if ch.State != "done" && !partial {
 				return "", fmt.Errorf("块 %d 未完成（%s），导出前需整卷翻译完成", ch.Index, ch.State)
 			}
 			if i > 0 {
@@ -314,7 +342,11 @@ func (e *Engine) ExportText(docID string, kind ExportKind) (string, error) {
 			}
 			b.WriteString(ch.Text)
 			b.WriteString("\n\n")
-			b.WriteString(ch.Translated)
+			if ch.State == "done" {
+				b.WriteString(ch.Translated)
+			} else {
+				fmt.Fprintf(&b, "[块 %d 未完成：%s]", ch.Index, ch.State)
+			}
 		}
 	default:
 		return "", fmt.Errorf("未知导出类型 %s", kind)
@@ -351,8 +383,13 @@ func (e *Engine) coverageLocked(d *Doc) []TermCoverage {
 				continue
 			}
 			cov.SourceChunks++
+			cov.SourceOccurrences += strings.Count(d.Chunks[i].Text, term)
+			cov.TargetOccurrences += strings.Count(d.Chunks[i].Translated, tr)
 			if strings.Contains(d.Chunks[i].Translated, tr) {
 				cov.HitChunks++
+			}
+			if d.Chunks[i].State != "done" || strings.Count(d.Chunks[i].Translated, tr) < strings.Count(d.Chunks[i].Text, term) {
+				cov.MissingChunks = append(cov.MissingChunks, d.Chunks[i].Index)
 			}
 		}
 		if cov.SourceChunks > 0 {

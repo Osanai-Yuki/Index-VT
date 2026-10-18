@@ -183,7 +183,7 @@
   --suj-h-control-lg: 36px;   /* 主 CTA（引导、空态） */
   --suj-h-row: 32px;          /* 操作态表格行 */
   --suj-h-row-lg: 40px;       /* 舒适态表格行（历史列表） */
-  --suj-h-rail: 64px;         /* 左导航宽（2026-10-06 按实现订正：原 56，实际 w-16=64） */
+  --suj-h-rail: 80px;         /* 左导航宽：图标与短标签共用的窄栏 */
   --suj-h-status: 40px;       /* 状态栏（同上订正：原 32，实际 h-10=40） */
   /* 内容列水平内缩：main 的 px 与状态栏首项的左内缩共用此值，
      状态栏左内缩 = rail + pad-shell-x，使首个 chip 与页面内容左缘对齐。 */
@@ -236,13 +236,13 @@
   --breakpoint-wide: 1380px;
 
   /* §3.2 字体栈（单一栈，CJK 在通用族之前——见文件头"字体栈纪律"）
-     Swiss：Archivo（内嵌，拉丁）+ Noto Sans SC 子集（内嵌，中文），系统 Helvetica/Arial/雅黑 兜底；
+     Swiss：Public Sans（内嵌，拉丁）+ Noto Sans SC 子集（内嵌，中文），系统 Helvetica/Arial/雅黑 兜底；
      Inter 已弃用并移出仓库。两份内嵌字体的 @font-face 见 theme/base.css。
      --font-app / --font-mono 是 font-app / font-mono utility 的 @theme 键，**不改名**。
      --font-mono 与旧文件同名，靠第 6 段的非分层重申取胜；
-   保留 JetBrains Mono 仅用于 .num 数字/时间码（功能性数据排版，非风格性衬线滥用）。 */
-  --font-app: 'Archivo', 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', 'Microsoft YaHei UI', 'Source Han Sans CN', 'PingFang SC', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
+   保留 Geist Mono 仅用于 .num 数字/时间码（功能性数据排版，非风格性衬线滥用）。 */
+  --font-app: 'Public Sans', 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', 'Microsoft YaHei UI', 'Source Han Sans CN', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
 
   /* §3.3 字阶（字重只用 400/500/600；Windows ClearType 下小字号 700 发糊） */
   --text-display: 20px;
@@ -317,9 +317,9 @@
    @theme 键，改名会变成 font-suj-mono。所以它保留原名，用这条重申压住旧文件的同名 :root。
    R29 删除的旧 `@theme inline { --font-mono: var(--font-mono) }` 自引用是同一个
    bug 的另一半；两半都要处理。scripts/verify-theme.mjs 的断言 #6 是这条的回归锁
-   （实测 .font-mono.num 的 computed font-family 是 JetBrains Mono 栈，非 IBM Plex）。
+   （实测 .font-mono.num 的 computed font-family 是 Geist Mono 栈，非 IBM Plex）。
    位置无关（非分层规则只与同为非分层的旧 :root 比源码顺序），放在文件末尾只为
    让 1–6 的编号与阅读顺序一致。 */
 :root {
-  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
+  --font-mono: 'Geist Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
 }

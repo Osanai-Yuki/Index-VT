@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "created": "2026-10-17",
+  "origin": "Original synthetic review fixtures; no externally sourced prose or subtitles included.",
+  "model_execution": "not run",
+  "short_case_count": 20,
+  "stress_characters_python_unicode": 38105,
+  "stress_expected_segments": 160,
+  "files": [
+    {
+      "name": "font-probe.txt",
+      "bytes": 467,
+      "sha256": "d7695f6ab2f076468f2de38cd0eab9b9dcefdb8e0d30755a2f4744b2eab34b2d"
+    },
+    {
+      "name": "glossary-reference.csv",
+      "bytes": 145,
+      "sha256": "718a396e3134b3ca8c53c9dc429bf3bb35f96098d29c942d07dc2ea0ba81396b"
+    },
+    {
+      "name": "longdoc-story.zh.md",
+      "bytes": 1969,
+      "sha256": "bc720fec4652298a5ef9383c6212a4b76ab8803e9c43ac8173a7cb38fe84ba2f"
+    },
+    {
+      "name": "longdoc-structural-stress.zh.md",
+      "bytes": 95558,
+      "sha256": "dc4e6b33dfaa9da6bea7c8fcb4507af844cf2c72e4f142cd57721c98e5356ba5"
+    },
+    {
+      "name": "short-cases.json",
+      "bytes": 7760,
+      "sha256": "d02a51765f7eddef046e49ebf4b0da345334c8e14413afb6d34e27faccaddef1"
+    },
+    {
+      "name": "short-cases.txt",
+      "bytes": 4985,
+      "sha256": "5adad57eb32ae7fc15fbc277070b321659d61ea6418e7962900de9a397948f86"
+    },
+    {
+      "name": "structure-source.md",
+      "bytes": 612,
+      "sha256": "42d7055325e34214b29c3efa12cdbe1b8bd5f29fbd3a05ec30476d4be983bd31"
+    },
+    {
+      "name": "structured-source.json",
+      "bytes": 307,
+      "sha256": "5f06fa7757fa1fb413f637d76f62fae559092706c5ab5acee0e601b3d8e207fb"
+    },
+    {
+      "name": "subtitle-challenge-utf16le.srt",
+      "bytes": 1400,
+      "sha256": "7c7ac27ed43c0ff512a5a6ebe25ba05590145ed8e082fd2ba0557641bbf0897c"
+    },
+    {
+      "name": "subtitle-challenge.ass",
+      "bytes": 998,
+      "sha256": "5d29a837b8214101271fbe11c37aa52f049fc36bdc48ed59d64d599c078f4bbc"
+    },
+    {
+      "name": "subtitle-challenge.lrc",
+      "bytes": 139,
+      "sha256": "c46f68f30069e46381bf4a9f0d258f2faef812aae7c02161e471dfba109eec9b"
+    },
+    {
+      "name": "subtitle-challenge.srt",
+      "bytes": 1153,
+      "sha256": "cae6c991826c63bc6b02432a752415815e59a6de46aa1e58e817e703df92a7db"
+    },
+    {
+      "name": "subtitle-challenge.vtt",
+      "bytes": 1211,
+      "sha256": "a8b56942c494e80ac3d13675ce320885c8d2a450478de83aea185276b7831a4d"
+    }
+  ]
+}

@@ -8,12 +8,12 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "Index-VT"
+    "name": "Osanai-Yuki"
   },
   "info": {
     "productName": "Index-VT",
     "productVersion": "1.0.0",
-    "copyright": "Copyright © 2026",
+    "copyright": "Copyright (c) 2026 Osanai-Yuki",
     "comments": "全本地 AI 桌面翻译工具"
   }
 }

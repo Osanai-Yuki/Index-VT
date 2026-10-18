@@ -18,6 +18,7 @@ export function LangSelect({
   isSource,
   detected,
   recent,
+  disabled = false,
 }: {
   langs: Lang[]
   value: string
@@ -25,9 +26,11 @@ export function LangSelect({
   isSource: boolean
   detected?: string
   recent: string[]
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  useEffect(() => { if (disabled) setOpen(false) }, [disabled])
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -67,6 +70,7 @@ export function LangSelect({
     <div className="relative" ref={ref}>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         className="flex items-center gap-2.5 bg-sunken border border-line px-3.5 py-2 min-w-40 cursor-pointer hover:border-lineStrong transition-colors duration-150"

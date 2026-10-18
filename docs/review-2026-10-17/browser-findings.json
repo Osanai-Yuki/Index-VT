@@ -1,0 +1,60 @@
+{
+  "docAfterDone": {
+    "startVisible": true,
+    "continueCount": 0,
+    "rerunCount": 0
+  },
+  "docAfterSecondClick": {
+    "starts": 2
+  },
+  "subtitleForeignEventVisible": true,
+  "subtitleLostOnNavigation": true,
+  "translate-1180-light": [
+    {
+      "text": "复制原文与译文",
+      "x": 883,
+      "right": 1029.5,
+      "viewport": 1180,
+      "clipped": false
+    },
+    {
+      "text": "重新翻译",
+      "x": 771,
+      "right": 899,
+      "viewport": 1180,
+      "clipped": false
+    }
+  ],
+  "translate-1680-light": [
+    {
+      "text": "复制原文与译文",
+      "x": 1133,
+      "right": 1279.5,
+      "viewport": 1680,
+      "clipped": false
+    },
+    {
+      "text": "重新翻译",
+      "x": 1287.5,
+      "right": 1415.5,
+      "viewport": 1680,
+      "clipped": false
+    }
+  ],
+  "translate-1280-dark": [
+    {
+      "text": "复制原文与译文",
+      "x": 933,
+      "right": 1079.5,
+      "viewport": 1280,
+      "clipped": false
+    },
+    {
+      "text": "重新翻译",
+      "x": 1087.5,
+      "right": 1215.5,
+      "viewport": 1280,
+      "clipped": false
+    }
+  ]
+}

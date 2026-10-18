@@ -96,25 +96,49 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 
 | 文件 | 体积 | 覆盖 |
 |---|---|---|
-| `archivo-latin-wght400-600.woff2` | 18.3 KB | 拉丁（Helvetica 系 Grotesque） |
-| `noto-sans-sc-cjk-wght400-600.woff2` | 1.72 MB | 中文：GB2312 全集 + 假名 + CJK 标点 + 全角；字库覆盖 **7764 个码位 / 7994 个字形**（实测 cmap） |
-| `jetbrains-mono-latin-wght400-500.woff2` | 30.7 KB | `.num` 等宽数字/时间码（功能性需求，非风格选择） |
+| `public-sans-latin-wght400-600.woff2` | 26.1 KB | 拉丁（中立 Grotesque，USWDS Public Sans） |
+| `noto-sans-sc-cjk-wght400-600.woff2` | 1.72 MB | 中文：GB2312 全集 + 假名 + CJK 标点 + 全角；字库覆盖 **7764 个码位 / 7764 个字形**（实测 cmap） |
+| `geist-mono-latin-wght400-500.woff2` | 33.8 KB | `.num` 等宽数字/时间码（功能性需求，非风格选择） |
 
+- **v2.2 换字体（2026）**：Archivo → **Public Sans**、JetBrains Mono → **Geist Mono**。中文保持 Noto Sans SC。
+  换的理由**不是授权**（三份本来就都是 OFL 1.1，见下），而是视觉口径：Public Sans 是 USWDS 委托设计的中立
+  Grotesque，比 Archivo 更贴近瑞士国际主义对「无性格、只承担信息」的要求。
+  **换字体的授权收益为零**——OFL→Apache 多一条 NOTICE 义务，OFL→厂商 EULA 义务更重；真正的收益是
+  「许可证确实随产物分发 + 保留字体名逐份核过」这两件可证明的事。完整论证见
+  `docs/research/font-license-verification-2026.md`。
 - **Inter 已弃用并移出仓库**（2026-10-06 瑞士重映射）：风格文档点名 Inter 属过度使用的默认字体。`--font-app` 里不得出现 `'Inter'`，仓库不得再引入 Inter woff2。
 - **CJK 策略修订**：v2.0 的"不打包 CJK（单字重 10MB+）"改为**打包常用子集**——全量 Noto Sans SC 变量字体实测 16.9MB，子集化后 1.72MB，exe 净增约 1.74MB（≈+9%）。
   **覆盖边界（必须如实告知）**：子集为 GB2312 档，简体常用字与假名齐；**生僻字、繁体、韩文不在字库内**，浏览器按字形回退系统 `Microsoft YaHei UI`，同一段文本里可能出现字形混排。扩覆盖 = 重跑子集脚本扩大字符集，体积近似线性增长。
+- **拉丁覆盖的两处已知缺口（如实记录）**：Public Sans 上游不含 `U+2191 ↑` / `U+2193 ↓`（Archivo 曾含），
+  全仓只有 `?primitives` 原语陈列页的标题与说明文字实际渲染这两个箭头，回退系统字体。等宽侧 Geist Mono
+  不含 `U+2215 ⁄`（除号斜杠，界面未用）。两种情况都落在字体栈的兜底族上，不影响任何交付页面。
+  缺口清单可用 `python tools/fonts/compare-coverage.py` 复现。
 - **禁止外链字体**：`index.html` 不得出现 Google Fonts `<link>`（旧 mockups.html 用了，离线应用里等于失效）。
-- **许可证**：三份均为 SIL OFL 1.1，`OFL-Archivo.txt` / `OFL-NotoSansSC.txt` 与字体同目录随仓库分发；JetBrains Mono 的许可证副本仍需在发布前补齐。
-- **回归锁**：`verify-theme.mjs` #7 断言三份 woff2 均被请求（200）且可用、无站外字体请求、`@font-face` 里不得残留 Inter。
+- **许可证**：三份均为 SIL OFL 1.1 —— 该许可**明确允许商用**，并逐字授予
+  "use, study, copy, merge, **embed**, **modify**, redistribute, and **sell**"，
+  义务只有三条：不得单独售卖字体本身；每份拷贝须附版权声明与许可证；Modified Version 不得用保留字体名。
+- **许可证文本随产物分发**：`frontend/public/licenses/OFL-{PublicSans,NotoSansSC,GeistMono}.txt`。
+  **必须是 `public/`，不能放 `src/assets/fonts/`**——后者没有被任何模块 `import`，Vite 会静默丢弃，
+  结果是字体进了 exe、许可证没进（2026 修复前就是这个状态，OFL §2 当时不满足）。
+  单文件 exe 里用户看不到 woff2 的 `name` 表，所以「机器可读元数据」这一路走不通，必须落成独立文本文件。
+- **保留字体名（OFL §3）**：子集化会钳制 `fvar` 的 `wght` 轴并重写 `instances`，所以这三份产物都是
+  **Modified Version**，§3 生效。逐份核对上游 OFL 原文的结果：
+  Public Sans 与 Geist Mono **未声明保留字体名**（用原名合法）；
+  Noto Sans SC 的 OFL 是 **Adobe 版权、保留名 `'Source'`**，而子集族名 `Noto Sans SC` 不含 `Source`，亦合法。
+  **推论**：将来若给 CJK 子集改名，不得改成任何含 `Source` 的名字；反向地，若要换成别的 OFL 字体，
+  必须先读该字体自带的 OFL 原文再决定能否沿用原名（`tools/fonts/report-fonts.py` 可直接打印版权行）。
+- **回归锁**：`verify-theme.mjs` #7 断言三份 woff2 均被请求（200）且可用、无站外字体请求、`@font-face` 里不得残留
+  Inter 与已退役的 Archivo / JetBrains Mono；
+  #11 断言 `dist/licenses/` 三份许可证齐全；#12 是换字体时的许可证审计闸门（新族名未登记即红）。
 
 ### 3.2 字体栈（必须单栈，这是修 bug）
 
 ```css
---font-app:  'Archivo', 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', 'Microsoft YaHei UI', 'Source Han Sans CN', 'PingFang SC', system-ui, sans-serif;
---font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
+--font-app:  'Public Sans', 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', 'Microsoft YaHei UI', 'Source Han Sans CN', 'PingFang SC', system-ui, sans-serif;
+--font-mono: 'Geist Mono', 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
 ```
 
-拉丁命中内嵌 **Archivo**；中文命中内嵌 **Noto Sans SC 子集**（`unicode-range` 只声明 CJK/假名/全角，与 Archivo 互不抢字）。两道内嵌都没命中时才回落系统 Helvetica/Arial/雅黑——也就是 Archivo 缺失、或字符在 CJK 子集之外时的表现。
+拉丁命中内嵌 **Public Sans**；中文命中内嵌 **Noto Sans SC 子集**（`unicode-range` 只声明 CJK/假名/全角，与 Public Sans 互不抢字）。两道内嵌都没命中时才回落系统 Helvetica/Arial/雅黑——也就是 Public Sans 缺失、或字符在 CJK 子集之外时的表现。
 
 > **旧实现的真 bug**：`font-family: var(--font-latin), var(--font-cjk)` 展开后通用族 `sans-serif` 排在 CJK 栈**之前**；按 CSS 字体匹配规则，命中通用族即停止，中文字体栈永不可达（已在浏览器实测确认）。**禁止**把字体栈拆成多个变量再拼接。
 
@@ -131,7 +155,7 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 
 **字重纪律**：只用 400 / 500 / 600。层级靠字号 + 字重 + ink 级，不靠颜色。
 
-> v2.1 起 600 是**真 600**：Archivo 与 Noto Sans SC 子集都带 400–600 的变体字重轴，`display`/`title` 得到实打实的 semibold。
+> 自 v2.1 起 600 是**真 600**：Public Sans 与 Noto Sans SC 子集都带 400–600 的变体字重轴，`display`/`title` 得到实打实的 semibold。
 > 只有整条字体栈都回落到系统 Arial 时（内嵌字体加载失败）才退化为 Arial Bold(700)——那是降级路径，不是常态。
 > 原禁令针对**小字号**在 Windows ClearType 下发糊，因此约束仍然有效：`.text-body`/`caption`/`micro` 只用 400/500。
 > **禁止**给 13px 及以下的文本加 600/700。
@@ -140,6 +164,10 @@ soft 底（badge 背景 / 选中行底）：light 用 `color-mix(in srgb, <token
 
 所有数字列强制 `font-variant-numeric: tabular-nums` + `--font-mono`：时间码、tok/s、TTFT、VRAM、计数、百分比、下载速度、端口。工具类 `.num`。
 > 旧实现时间码列因数字宽度不等而左右抖动，此为根因。
+
+> **换等宽字体为什么没有功能风险**：Geist Mono 与已退役的 JetBrains Mono 都是**天然等宽**——十个数字的
+> advance 恒为 600 units（`tools/fonts/report-features.py` 可复算），所以时间码列对齐**不依赖 `tnum` 特性**。
+> 两份产物的 GSUB 里都没有 `tnum`，而 `tabular-nums` 依旧成立。`DESIGN.md` §3.3 的字面值来自实测而非假设。
 
 ### 3.5 行文限宽
 

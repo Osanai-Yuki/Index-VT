@@ -24,17 +24,21 @@ const CHIP = 'inline-flex items-center gap-1.5 px-2.5 h-6 shrink-0 rounded-full 
 export function StatusBar() {
   const status = useAppStore((s) => s.status)
   const orchState = useAppStore((s) => s.orchState)
-  const modelId: string = status?.activeModel ?? 'translate'
+  const releaseSeconds = useAppStore((s) => s.idleReleaseSeconds)
+  const modelId: string = (orchState !== 'idle' && status?.runningModel) || status?.activeModel || 'translate'
   const gpuTotal = status?.gpu?.totalMB ?? 0
   const gpuUsed = status?.gpu?.usedMB ?? 0
   const vramPct = gpuTotal > 0 ? Math.round((gpuUsed / gpuTotal) * 100) : 0
-  const idleMin = status?.idleMinutes ?? 5
+  const idleMin = status?.idleMinutes ?? 30
   const idleSec = status?.idleSeconds ?? 0
   const remainSec = Math.max(0, idleMin * 60 - idleSec)
   const mm = Math.floor(remainSec / 60)
   const ss = remainSec % 60
   const stateText = STATE_TEXT[orchState] ?? orchState
   const running = orchState === 'running'
+  const activeTasks = (status?.activeTasks ?? 0) > 0
+  const countdownSeconds = releaseSeconds >= 0 ? releaseSeconds : remainSec
+  const idleWarning = !activeTasks && countdownSeconds <= 5 * 60
 
   return (
     <footer
@@ -59,7 +63,7 @@ export function StatusBar() {
       </span>
       {gpuTotal > 0 ? (
         <span className="flex items-center gap-2 min-w-0 shrink">
-          <span className="shrink-0">VRAM</span>
+          <span className="shrink-0" title="显卡全部进程的总占用，不代表本应用独立占用">GPU 总占用</span>
           <span
             className="w-24 min-w-4 shrink h-1 bg-sunken overflow-hidden inline-block"
             title={`显存占用 ${vramPct}%`}
@@ -71,26 +75,26 @@ export function StatusBar() {
           </span>
         </span>
       ) : (
-        <span className="shrink-0">CPU 推理模式</span>
+        <span className="shrink-0">{status?.gpu?.present ? '显存数据暂不可用' : '未检测到 GPU · CPU 模式'}</span>
       )}
       {running && idleMin > 0 ? (
         <button
           type="button"
-          className="shrink-0 text-accent cursor-pointer bg-transparent border-0 p-0 text-micro tracking-wide"
+          className={`shrink-0 cursor-pointer bg-transparent border-0 p-0 text-micro tracking-wide ${idleWarning ? 'text-danger' : 'text-ink3'}`}
           title="点击保持加载（重置空闲计时）"
           onClick={() => apiKeepAlive().catch(() => {})}
         >
-          空闲 <span className="num">{mm}:{String(ss).padStart(2, '0')}</span> 后自动释放
+          {releaseSeconds >= 0 ? <><span className="num">{releaseSeconds}</span> 秒后释放</> : activeTasks ? '任务进行中 · 保持加载' : <>无操作 <span className="num">{mm}:{String(ss).padStart(2, '0')}</span> 后提示释放</>}
         </button>
       ) : running ? (
-        <span className="shrink-0 text-accent">常驻加载</span>
+        <span className="shrink-0 text-ink3">常驻加载</span>
       ) : (
         <span className="shrink-0 text-ink3">模型未加载（任务自动唤醒）</span>
       )}
       <span className="flex-1 min-w-0" />
       <span className={`${CHIP} border-lineStrong bg-sunken text-ok`}>
         <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-ok" />
-        离线可用
+        本地推理
       </span>
       <span className="min-w-0 shrink truncate">全本地推理 · 零遥测</span>
       <span className="num shrink-0">{status?.version ?? 'v1.0.0'}</span>

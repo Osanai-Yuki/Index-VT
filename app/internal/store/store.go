@@ -292,6 +292,11 @@ func (s *Store) glossaryItems(id int64) ([]GlossaryItemEnt, error) {
 
 // SaveGlossary id=0 新建；否则整体替换。全部语句在同一事务内，失败即整体回滚。
 func (s *Store) SaveGlossary(g Glossary) (int64, error) {
+	var err error
+	g, err = ValidateGlossary(g)
+	if err != nil {
+		return 0, err
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -308,8 +313,12 @@ func (s *Store) SaveGlossary(g Glossary) (int64, error) {
 			return 0, err
 		}
 	} else {
-		if _, err := tx.Exec(`UPDATE glossaries SET name = ? WHERE id = ?`, g.Name, g.ID); err != nil {
+		result, err := tx.Exec(`UPDATE glossaries SET name = ? WHERE id = ?`, g.Name, g.ID)
+		if err != nil {
 			return 0, err
+		}
+		if n, _ := result.RowsAffected(); n != 1 {
+			return 0, fmt.Errorf("术语本已不存在，请刷新后重试")
 		}
 		if _, err := tx.Exec(`DELETE FROM glossary_items WHERE glossary_id = ?`, g.ID); err != nil {
 			return 0, err

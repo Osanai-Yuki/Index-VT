@@ -5,13 +5,14 @@
 // 激活条件：模型文件已登记即可启用（此前写死只允许 translate，下载完的模型选不了）；
 // 对暂无专属消费界面的模型如实标注后果，不禁止选择。
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Check, FolderOpen, Pause, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Check, FolderOpen, Pause, Trash2 } from 'lucide-react'
 import { Badge, Button, Modal, Progress, Segmented } from '../components/ui/index'
 import { toast } from '../stores/toastStore'
 import { useAppStore } from '../stores/appStore'
 import { on, EV } from '../lib/wails'
 import {
   apiListModels,
+  apiGetDownloadLocation,
   apiListUnknownModels,
   apiAssignUnknown,
   apiDownloadModel,
@@ -35,6 +36,7 @@ interface DlProgress {
   speedBPS?: number
   source?: string
   message?: string
+  receivedAt?: number
 }
 
 const STATE_META: Record<string, { text: string; tone: BadgeTone }> = {
@@ -49,8 +51,8 @@ const STATE_META: Record<string, { text: string; tone: BadgeTone }> = {
 
 const MODEL_NAMES: Record<string, string> = {
   translate: 'Index-Translate-2B（主翻译）',
-  nailong: 'Index-Nailong-2B（长文档 · M5）',
-  homura: 'Index-Homura-2B（配音 · 无界面入口）',
+  nailong: 'Index-Nailong-2B（长文档）',
+  homura: 'Index-Homura-2B（配音）',
 }
 
 const errToast = (e: unknown) =>
@@ -59,6 +61,12 @@ const errToast = (e: unknown) =>
 export function ModelHub() {
   const status = useAppStore((s) => s.status)
   const refreshStatus = useAppStore((s) => s.refreshStatus)
+  const [location, setLocation] = useState<{ path: string; freeBytes: number; known: boolean } | null>(null)
+  const [clock, setClock] = useState(Date.now())
+  const tasks = useAppStore(s => s.pageTasks)
+  const busy = Object.values(tasks).some(Boolean) || (status?.activeTasks ?? 0) > 0
+  useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer) }, [])
+  useEffect(() => { apiGetDownloadLocation().then(setLocation).catch(() => {}) }, [])
   const [models, setModels] = useState<any[]>([])
   /* 后端 ListUnknownModels 返回的是 []ModelInfo（含 path 字段），不是字符串数组 ——
      这里在边界上取 path，页面其余部分只认字符串键。 */
@@ -95,7 +103,7 @@ export function ModelHub() {
   useEffect(() => {
     refresh()
     const off = on(EV.MODEL_PROGRESS, (e) => {
-      const p = (e ?? {}) as DlProgress
+      const p = { ...(e ?? {}), receivedAt: Date.now() } as DlProgress
       const id = p.modelId
       if (!id) return
       switch (p.phase) {
@@ -120,7 +128,7 @@ export function ModelHub() {
         case 'canceled':
           dropLive(id)
           refresh()
-          toast.push({ tone: 'warn', message: '已取消下载 · 断点保留，可续传' })
+          toast.push({ tone: 'warn', message: '已停止下载，进度保留；再次点下载可续传' })
           break
         case 'failed':
           dropLive(id)
@@ -151,6 +159,7 @@ export function ModelHub() {
 
   return (
     <div className="flex flex-col gap-4 h-full overflow-auto screen-in">
+      <p className="text-caption text-ink2">模型目录：{location?.path ?? '正在读取…'} · 剩余空间：{location?.known ? `${(location.freeBytes / (1 << 30)).toFixed(1)} GB` : '暂不可用'}。同源且文件未变更时续传；切源或内容更新会重新下载。下载或校验失败可重试，校验通过后才能使用。</p>
       {/* 顶部：VRAM 仪表（窄窗加固：flex-wrap 整块换行，VRAM 条可收缩，按钮不折字） */}
       <div className="bg-surface border border-line flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
         <span className="text-micro uppercase tracking-caps text-ink3">
@@ -159,8 +168,8 @@ export function ModelHub() {
         <span className="w-px h-5 bg-lineStrong" />
         {gpuTotal > 0 ? (
           <div className="flex min-w-0 flex-1 basis-64 max-w-80 items-center gap-3">
-            <span className="text-micro uppercase tracking-caps text-ink3">VRAM</span>
-            <Progress pct={(gpuUsed / gpuTotal) * 100} tone="ok" label="显存占用" />
+            <span className="text-micro uppercase tracking-caps text-ink3">GPU 总占用</span>
+            <Progress pct={(gpuUsed / gpuTotal) * 100} tone="ok" label="显卡全部进程的显存总占用" />
             <Badge>
               <span className="num">{(gpuUsed / 1024).toFixed(1)} / {(gpuTotal / 1024).toFixed(1)} GB</span>
             </Badge>
@@ -196,11 +205,13 @@ export function ModelHub() {
           const present = curQuant?.present
           const downloading = m.state === 'downloading'
           const verifying = downloading && dl?.phase === 'verifying'
-          const pct = dl?.bytesTotal ? Math.min(100, ((dl.bytesDone ?? 0) / dl.bytesTotal) * 100) : 0
+          const pct = dl?.bytesTotal && dl.bytesTotal > 0 ? Math.min(100, ((dl.bytesDone ?? 0) / dl.bytesTotal) * 100) : 0
           // 激活条件：文件已登记进 store 即可。不再要求 sha256 非空——导入件与
           // 未校验档位可能没有哈希，写死会让本来能用的模型选不了；校验状态卡片上已如实显示。
           const activatable = !!present
-          const noConsumer = m.id !== 'translate'
+          const noConsumer = m.id === 'nailong'
+          const requiredBytes = (curQuant?.sizeBytes || (quant === 'Q4_K_M' ? 1.31 : 2.08) * (1 << 30)) * 1.2
+          const insufficientDisk = !!location?.known && location.freeBytes < requiredBytes
           return (
             <div
               key={m.id}
@@ -243,13 +254,13 @@ export function ModelHub() {
               <div className="px-4 py-3 flex flex-col gap-3 flex-1">
                 {downloading && dl ? (
                   <div className="flex flex-col gap-2">
-                    <Progress pct={verifying ? 100 : pct} tone="warn" label={`${m.name} 下载进度`} />
+                    <Progress pct={verifying ? 100 : pct} indeterminate={!verifying && !(dl.bytesTotal && dl.bytesTotal > 0)} tone="warn" label={`${m.name} 下载进度`} />
                     <div className="flex justify-between text-micro text-ink3 tracking-wide">
                       <span className="num">
                         {verifying
                           ? 'SHA256 校验中…'
-                          : `${(dl.bytesDone ?? 0) / (1 << 20) | 0} / ${(dl.bytesTotal ?? 0) / (1 << 20) | 0} MB${
-                              dl.speedBPS ? ` · ${(dl.speedBPS / (1 << 20)).toFixed(1)} MB/s` : ''
+                          : `${(dl.bytesDone ?? 0) / (1 << 20) | 0} / ${dl.bytesTotal && dl.bytesTotal > 0 ? `${dl.bytesTotal / (1 << 20) | 0} MB` : '总大小未知'}${
+                              dl.receivedAt && clock - dl.receivedAt < 5000 && dl.speedBPS ? ` · ${(dl.speedBPS / (1 << 20)).toFixed(1)} MB/s` : ' · 等待数据，速度暂不可用'
                             }`}
                       </span>
                       <span>{dl.source ? `${dl.source === 'hf' ? 'HF' : 'ModelScope'} · ` : ''}{verifying ? '校验后自动登记' : '支持断点续传'}</span>
@@ -290,21 +301,19 @@ export function ModelHub() {
                   {m.state === 'downloading' ? (
                     <>
                       <Button onClick={() => apiCancelDownload(m.id).catch(errToast)}>
-                        <Pause size={14} /> 暂停
+                        <Pause size={14} /> 停止下载（保留进度）
                       </Button>
-                      <Button kind="danger" onClick={() => apiCancelDownload(m.id).catch(errToast)}>
-                        <X size={14} /> 取消
-                      </Button>
+
                     </>
                   ) : present ? (
                     <>
                       <Button
                         kind={m.active ? 'primary' : 'secondary'}
-                        disabled={!activatable && !m.active}
+                        disabled={busy || (!activatable && !m.active)}
                         title={
                           activatable
                             ? noConsumer
-                              ? '主翻译台目前用通用提示词驱动该模型（Nailong 官方模板链路待 M5）'
+                              ? '主翻译台目前用通用提示词驱动该模型（文档翻译页使用专用模板）'
                               : undefined
                             : '模型文件尚未下载，无法设为当前'
                         }
@@ -323,6 +332,8 @@ export function ModelHub() {
                   ) : (
                     <Button
                       kind="primary"
+                      disabled={insufficientDisk}
+                      title={insufficientDisk ? '磁盘空间不足，请释放空间或迁移项目目录后重试' : undefined}
                       arrow
                       onClick={() =>
                         apiDownloadModel(m.id, quant)
@@ -339,6 +350,7 @@ export function ModelHub() {
                     </Button>
                   )}
                 </div>
+                {insufficientDisk && !present && <p className="text-caption text-danger">空间不足：含余量约需 {(requiredBytes / (1 << 30)).toFixed(1)} GB，请释放空间或迁移项目目录。</p>}
               </div>
               {/* 已激活但没有专属消费界面的模型：如实说明后果，而不是不让选 */}
               {m.active && noConsumer && (
@@ -350,7 +362,7 @@ export function ModelHub() {
               {m.state === 'running' && (
                 <div className="border-t border-line bg-accentSoft px-4 py-2 flex items-center gap-2 text-micro text-accent">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" aria-hidden="true" />
-                  空闲 <span className="num">{Math.max(0, (status?.idleMinutes ?? 5) * 60 - (status?.idleSeconds ?? 0))}s</span> 后自动释放
+                  {(status?.activeTasks ?? 0) > 0 ? '任务进行中 · 保持加载' : '连续 30 分钟无操作后提示，倒计时 30 秒释放'}
                   <button
                     type="button"
                     className="ml-auto text-accent cursor-pointer bg-transparent border-0 text-micro"

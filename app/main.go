@@ -20,6 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	windowsOptions "github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"indexvt/internal/envprobe"
 	"indexvt/internal/paths"
@@ -47,6 +48,15 @@ const (
 )
 
 func main() {
+	// Wails 绑定生成只需要反射 API，不启动应用、抢单实例锁或创建数据和日志。
+	if bindingsBuild {
+		if err := wails.Run(&options.App{Bind: []interface{}{&App{}}}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	showVersion := flag.Bool("version", false, "打印版本退出")
 	flag.Parse()
 	if *showVersion {
@@ -72,12 +82,6 @@ func main() {
 
 	_ = paths.EnsureDirs()
 
-	// 日志：logs/indexvt-YYYYMMDD.log，滚动保留 7 天（01 文档 §9）
-	logClose := setupLogger()
-	if logClose != nil {
-		defer (*logClose)()
-	}
-
 	// 启动残留清扫（02 文档 §6.4 三重指纹），结果在首次引导展示
 	sweep := envprobe.SweepResiduals()
 	if sweep.Count > 0 {
@@ -85,12 +89,18 @@ func main() {
 	}
 
 	app := &App{}
+	defer func() {
+		if app.logClose != nil {
+			_ = (*app.logClose)()
+		}
+	}()
 	err = wails.Run(&options.App{
 		Title:     appTitle,
 		Width:     1280,
 		Height:    800,
 		MinWidth:  1180,
 		MinHeight: 700,
+		Windows:   &windowsOptions.Options{IsZoomControlEnabled: true},
 		// 瑞士风格基准底色（#FFFFFF）：WebView2 首帧前默认白底，深色主题下会先白后黑
 		// 闪一下（B30）；预置设计基准底色消除该闪变。
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
@@ -107,6 +117,14 @@ func main() {
 		// 在此补上推理进程释放，否则 llama-server 成孤儿常驻显存。
 		// prepare 失败也放行关闭 —— 不得把用户困在关不掉的窗口里。
 		OnBeforeClose: func(ctx context.Context) (prevent bool) {
+			confirmed, err := app.ConfirmExit()
+			if err != nil {
+				slog.Error("确认退出失败", "err", err)
+				return true
+			}
+			if !confirmed {
+				return true
+			}
 			if err := app.PrepareExit(); err != nil {
 				slog.Error("OnBeforeClose 中 PrepareExit 失败", "err", err)
 			}
@@ -124,8 +142,12 @@ func main() {
 	}
 }
 
-// setupLogger 初始化 slog（文件+stdout），清理 7 天前日志。
-func setupLogger() *func() error {
+// setupLogger 仅在用户开启日志时创建文件；关闭时丢弃输出，不创建日志文件。
+func setupLogger(enabled bool) *func() error {
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if !enabled {
+		return nil
+	}
 	_ = paths.EnsureDirs()
 	entries, _ := os.ReadDir(paths.LogsDir())
 	cutoff := time.Now().AddDate(0, 0, -logKeepDays)

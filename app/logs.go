@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,47 @@ import (
 // 测试与打包逻辑共用这一份事实来源（logs_test.go: TestCollectLogsExcludesInferenceLog）。
 var logsExcludedFromBundle = map[string]bool{
 	"llama-server.out.log": true,
+}
+
+type LogCleanupResult struct {
+	Removed int      `json:"removed"`
+	Skipped []string `json:"skipped"`
+}
+
+// ClearLogs 仅清理应用生成的日志与诊断包；不递归、不跟随链接，不触碰模型或数据。
+func (a *App) ClearLogs() (LogCleanupResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return LogCleanupResult{}, err
+	}
+	a.logsMu.Lock()
+	defer a.logsMu.Unlock()
+	return clearLogsInto(paths.LogsDir())
+}
+
+func clearLogsInto(dir string) (LogCleanupResult, error) {
+	result := LogCleanupResult{Skipped: []string{}}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		owned := name == "llama-server.out.log" ||
+			(strings.HasPrefix(name, "indexvt-") && strings.HasSuffix(name, ".log")) ||
+			(strings.HasPrefix(name, "indexvt-logs-") && strings.HasSuffix(name, ".zip"))
+		if !owned || !entry.Type().IsRegular() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			result.Skipped = append(result.Skipped, name)
+		} else {
+			result.Removed++
+		}
+	}
+	return result, nil
 }
 
 // collectLogsZip 一键打包：logs/ 运行日志（不含 logsExcludedFromBundle 内的推理日志）

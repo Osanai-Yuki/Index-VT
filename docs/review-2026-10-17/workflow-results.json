@@ -1,0 +1,82 @@
+[
+  {
+    "name": "document prevents duplicate submission and leaves pending state after start",
+    "ok": true
+  },
+  {
+    "name": "cancel/continue reuses document and preserves completed chunk",
+    "ok": true
+  },
+  {
+    "name": "full retranslation requires confirmation and calls restart instead of resume",
+    "ok": true
+  },
+  {
+    "name": "late document snapshot and foreign events cannot overwrite newly imported document",
+    "ok": true
+  },
+  {
+    "name": "document state, running progress and scrolling survive navigation",
+    "ok": true
+  },
+  {
+    "name": "main translation buffers terminal event before handle and prevents duplicate starts",
+    "ok": true
+  },
+  {
+    "name": "main cancel waits for backend terminal event and retains partial translation",
+    "ok": true
+  },
+  {
+    "name": "IME Enter does not commit subtitle draft; normal Enter does",
+    "ok": true
+  },
+  {
+    "name": "rapid time steps are queued and all increments reach backend",
+    "ok": true
+  },
+  {
+    "name": "delete exposes undo and authoritative undo snapshot restores original rows",
+    "ok": true
+  },
+  {
+    "name": "subtitle menu supports keyboard, viewport edges and focus return",
+    "ok": true
+  },
+  {
+    "name": "subtitle export distinguishes cancel/success and offers reveal-file action",
+    "ok": true
+  },
+  {
+    "name": "document partial export requires confirmation and explicit partial kind",
+    "ok": true
+  },
+  {
+    "name": "glossary CSV imports quoted content, previews replacement, saves and can undo",
+    "ok": true
+  },
+  {
+    "name": "glossary parser rejects duplicates, empty cells and malformed quoting",
+    "ok": true
+  },
+  {
+    "name": "exit can return to workbench without releasing engine",
+    "ok": true
+  },
+  {
+    "name": "confirmed exit runs release and quit once despite repeated shortcuts",
+    "ok": true
+  },
+  {
+    "name": "canceling exit permits another confirmation and release failure still quits",
+    "ok": true
+  },
+  {
+    "name": "quit failure restores interface with a visible error and allows retry",
+    "ok": true
+  },
+  {
+    "name": "all pages expose a main heading and main landmark",
+    "ok": true
+  }
+]

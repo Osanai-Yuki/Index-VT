@@ -191,7 +191,7 @@ func ProbeSources(repo, file string) map[SourceKind]*sourceProbe {
 }
 
 // chooseSource 探测择优：连通性优先；HF 不可达或延迟 >3× ModelScope 时选 MS
-//（01 文档 §5.2）。pref 强制时直选（仅当该源连通）。
+// （01 文档 §5.2）。pref 强制时直选（仅当该源连通）。
 func chooseSource(probes map[SourceKind]*sourceProbe, pref string) (SourceKind, error) {
 	hf, ms := probes[SourceHF], probes[SourceMS]
 	switch pref {
@@ -239,11 +239,11 @@ func msErr(p *sourceProbe) string {
 // ---------- .part 元数据（同源续传依据，02 文档 §4 现象 A） ----------
 
 type partMeta struct {
-	URL    string `json:"url"`    // 完整源 URL（含源身份）
-	ETag   string `json:"etag"`
-	Size   int64  `json:"size"`
+	URL     string `json:"url"` // 完整源 URL（含源身份）
+	ETag    string `json:"etag"`
+	Size    int64  `json:"size"`
 	ModelID string `json:"modelId"`
-	Quant  string `json:"quant"`
+	Quant   string `json:"quant"`
 }
 
 func partPaths(final string) (string, string) {
@@ -406,6 +406,16 @@ func (m *Manager) startDownload(ctx context.Context, spec ModelSpec, quant Quant
 		}
 	}
 	out.Close()
+	cancelled := func() bool {
+		if ctx.Err() == nil {
+			return false
+		}
+		progress(DownloadProgress{Phase: "canceled", Source: string(chosen), Message: "已停止下载或校验，进度保留，可再次下载续传"})
+		return true
+	}
+	if cancelled() {
+		return nil
+	}
 
 	if total > 0 && done != total {
 		return fail(fmt.Sprintf("体积不符: 已下 %d / 预期 %d", done, total))
@@ -414,7 +424,13 @@ func (m *Manager) startDownload(ctx context.Context, spec ModelSpec, quant Quant
 
 	// 5. SHA256 校验（优先官方 SHA256SUMS.txt）
 	official, offErr := fetchOfficialSHA256(ctx, spec.Repo, file, chosen)
-	got, err := sha256File(partFile)
+	if cancelled() {
+		return nil
+	}
+	got, err := sha256FileContext(ctx, partFile)
+	if cancelled() {
+		return nil
+	}
 	if err != nil {
 		return fail("SHA256 计算失败: " + err.Error())
 	}
@@ -509,6 +525,10 @@ func verifyIntegrity(official string, officialErr error, got string) error {
 }
 
 func sha256File(path string) (string, error) {
+	return sha256FileContext(context.Background(), path)
+}
+
+func sha256FileContext(ctx context.Context, path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -517,6 +537,9 @@ func sha256File(path string) (string, error) {
 	h := sha256.New()
 	buf := make([]byte, 1<<22)
 	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		n, rerr := f.Read(buf)
 		if n > 0 {
 			h.Write(buf[:n])
@@ -534,10 +557,22 @@ func sha256File(path string) (string, error) {
 func checkDiskSpace(dir string, needBytes int64) error {
 	need := needBytes + needBytes/5 // ×1.2
 	du := diskUsage(dir)
-	if du.free > 0 && du.free < need {
+	if du.total > 0 && du.free < need {
 		return fmt.Errorf("磁盘剩余 %.1fGB 不足（需 %.1fGB）", float64(du.free)/(1<<30), float64(need)/(1<<30))
 	}
 	return nil
+}
+
+type DownloadLocation struct {
+	Path      string `json:"path"`
+	FreeBytes int64  `json:"freeBytes"`
+	Known     bool   `json:"known"`
+}
+
+func GetDownloadLocation() DownloadLocation {
+	dir := paths.ModelsDir()
+	du := diskUsage(dir)
+	return DownloadLocation{Path: dir, FreeBytes: du.free, Known: du.total > 0}
 }
 
 // speedWindow 简单滑动窗口测速。
@@ -574,4 +609,3 @@ func (s *speedWindow) bps() float64 {
 	}
 	return float64(s.bytes) / elapsed
 }
-

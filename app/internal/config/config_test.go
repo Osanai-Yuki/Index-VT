@@ -2,6 +2,17 @@ package config
 
 import "testing"
 
+func TestMigrateInactivityPolicy(t *testing.T) {
+	for _, old := range []int{-1, 0, 1, 5, 30, 60} {
+		cfg := Default()
+		cfg.Resource.IdleUnloadMinutes = old
+		cfg.Normalize()
+		if cfg.Resource.IdleUnloadMinutes != 30 {
+			t.Fatalf("old idle value %d was not migrated", old)
+		}
+	}
+}
+
 func TestNormalizeCtxTokensOverride(t *testing.T) {
 	cases := []struct{ in, want int }{
 		{0, 0},         // 0 = 跟随预设档，不动

@@ -48,15 +48,15 @@ const (
 )
 
 type Inference struct {
-	NGLOverride int  `json:"nglOverride"` // -1=自动（GPU 99 / CPU 0），否则用户固定值
-	CtxTier     CtxTier `json:"ctxTier"`  // llama-server -c（预设档）
-	CtxTokensOverride int `json:"ctxTokensOverride"` // 0=跟随预设档；否则 2048-65536，Normalize 夹取并对齐 1024
-	CPUThreads  int  `json:"cpuThreads"`  // 0=自动（物理核心数）
-	TempOverride bool `json:"tempOverride"` // 高级区温度覆盖开关（默认关：三模型默认参数已最优）
+	NGLOverride       int     `json:"nglOverride"`       // -1=自动（GPU 99 / CPU 0），否则用户固定值
+	CtxTier           CtxTier `json:"ctxTier"`           // llama-server -c（预设档）
+	CtxTokensOverride int     `json:"ctxTokensOverride"` // 0=跟随预设档；否则 2048-65536，Normalize 夹取并对齐 1024
+	CPUThreads        int     `json:"cpuThreads"`        // 0=自动（物理核心数）
+	TempOverride      bool    `json:"tempOverride"`      // 高级区温度覆盖开关（默认关：三模型默认参数已最优）
 }
 
 type Resource struct {
-	IdleUnloadMinutes int          `json:"idleUnloadMinutes"` // 0=常驻；默认 5（02 文档 §6.1：1-30 或 0）
+	IdleUnloadMinutes int           `json:"idleUnloadMinutes"` // 固定 30 分钟无操作，再提示 30 秒后释放
 	CloseBehavior     CloseBehavior `json:"closeBehavior"`
 }
 
@@ -74,13 +74,14 @@ type HistoryConf struct {
 }
 
 type Config struct {
-	Inference   Inference    `json:"inference"`
-	Resource    Resource     `json:"resource"`
-	Download    Download     `json:"download"`
-	Appearance  Appearance   `json:"appearance"`
-	History     HistoryConf  `json:"history"`
-	Onboarded   bool         `json:"onboarded"`
-	ActiveModel string       `json:"activeModel"` // translate | nailong | homura
+	LoggingEnabled bool        `json:"loggingEnabled"` // 默认关闭；修改后重启应用生效
+	Inference      Inference   `json:"inference"`
+	Resource       Resource    `json:"resource"`
+	Download       Download    `json:"download"`
+	Appearance     Appearance  `json:"appearance"`
+	History        HistoryConf `json:"history"`
+	Onboarded      bool        `json:"onboarded"`
+	ActiveModel    string      `json:"activeModel"` // translate | nailong | homura
 }
 
 // Default 返回设计默认值（01 文档 §5.1 启动参数 + §6.4 设置页）。
@@ -93,7 +94,7 @@ func Default() Config {
 			TempOverride: false,
 		},
 		Resource: Resource{
-			IdleUnloadMinutes: 5,
+			IdleUnloadMinutes: 30,
 			CloseBehavior:     CloseExitRelease,
 		},
 		Download:   Download{SourcePref: SourceAuto},
@@ -105,9 +106,8 @@ func Default() Config {
 
 // Normalize 约束取值范围（02 文档 §6.1 空闲 1-30 或 0 常驻等）。
 func (c *Config) Normalize() {
-	if c.Resource.IdleUnloadMinutes < 0 || c.Resource.IdleUnloadMinutes > 30 {
-		c.Resource.IdleUnloadMinutes = 5
-	}
+	// 迁移旧的“无任务 0–30 分钟”策略；统一为无操作半小时，避免沿用旧 5 分钟配置。
+	c.Resource.IdleUnloadMinutes = 30
 	switch c.Inference.CtxTier {
 	case Ctx8K, Ctx16K, Ctx32K:
 	default:

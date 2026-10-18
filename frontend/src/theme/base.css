@@ -12,21 +12,21 @@
 
 /* ── 离线字体（DESIGN.md §3.1）──────────────────────────────────
    三份本地 woff2（全部裁到 wght 400–600，`font-display: swap`）：
-   · Archivo（latin 子集，18.3KB）——界面拉丁字，Helvetica 系 Grotesque
-   · Noto Sans SC（CJK 子集，1.72MB）——中文，GB2312 + 假名 + CJK 标点，7994 字形
-   · JetBrains Mono（latin 子集，30.7KB）——`.num` 等宽数字/时间码（功能性需求，非风格选择）
+   · Public Sans（latin 子集，26.1KB）——界面拉丁字，中立 Grotesque（USWDS）
+   · Noto Sans SC（CJK 子集，1.72MB）——中文，GB2312 + 假名 + CJK 标点，7764 字形
+   · Geist Mono（latin 子集，33.8KB）——`.num` 等宽数字/时间码（功能性需求，非风格选择）
    Inter 已随 v2.1 弃用并移出仓库。超出 CJK 子集的字（生僻/繁体/韩文）逐字回退系统
    `Microsoft YaHei UI`——这是 1.72MB 对 16.9MB（Noto SC 全量）的取舍，口径见 DESIGN.md §3.1。
-   `unicode-range` 两边都必须声明：Archivo 只认 latin、Noto 只认 CJK 与假名，
+   `unicode-range` 两边都必须声明：Public Sans 只认 latin、Noto 只认 CJK 与假名，
    互不抢字，也避免浏览器用 CJK 字体去渲染拉丁。
    **禁止**改用 <link> 外链（Google Fonts 等）：本应用是离线桌面应用。
    回归锁：verify-theme #7（三份 woff2 均被请求、无站外字体、@font-face 里不得出现 Inter）。 */
 @font-face {
-  font-family: 'Archivo';
+  font-family: 'Public Sans';
   font-style: normal;
   font-weight: 400 600;
   font-display: swap;
-  src: url('../assets/fonts/archivo-latin-wght400-600.woff2') format('woff2');
+  src: url('../assets/fonts/public-sans-latin-wght400-600.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
     U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
     U+FEFF, U+FFFD;
@@ -44,11 +44,11 @@
 }
 
 @font-face {
-  font-family: 'JetBrains Mono';
+  font-family: 'Geist Mono';
   font-style: normal;
   font-weight: 400 500;   /* 变体字重轴：覆盖 .num / 刻度标签用到的 400 与 500 */
   font-display: swap;
-  src: url('../assets/fonts/jetbrains-mono-latin-wght400-500.woff2') format('woff2');
+  src: url('../assets/fonts/geist-mono-latin-wght400-500.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
     U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
     U+FEFF, U+FFFD;

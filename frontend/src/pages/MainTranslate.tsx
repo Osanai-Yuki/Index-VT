@@ -9,8 +9,10 @@ import { allModes, MANUAL_CUSTOM_ID, useModeStore, type ModeConstraints, type Mo
 import { ModeDetails } from '../components/ModeDetails'
 import { LangSelect, Lang } from '../LangSelect'
 import { useAppStore } from '../stores/appStore'
+import { toast } from '../stores/toastStore'
 import {
   apiTranslate,
+  apiNoteWorkspace,
   apiCancelTask,
   apiListHistory,
   apiSearchHistory,
@@ -36,7 +38,7 @@ interface Glossary {
   items: { term: string; translation: string }[]
 }
 
-type Phase = 'idle' | 'loading' | 'streaming' | 'done' | 'error'
+type Phase = 'idle' | 'loading' | 'streaming' | 'stopping' | 'done' | 'error'
 
 interface ConstraintState {
   glossaryId: number
@@ -49,15 +51,20 @@ interface ConstraintState {
 const lines = (s: string): string[] =>
   s.split('\n').map((l) => l.trim()).filter(Boolean)
 
-export function MainTranslate({ langs }: { langs: Lang[] }) {
+export function MainTranslate({ langs, active = true }: { langs: Lang[]; active?: boolean }) {
   const orchState = useAppStore((s) => s.orchState)
   const [sourceLang, setSourceLang] = useState('auto')
   const [targetLang, setTargetLang] = useState('en')
   const [recent, setRecent] = useState<string[]>(['ja', 'es', 'ko'])
   const [input, setInput] = useState('')
   const [output, setOutput] = useState('')
+  useEffect(() => { apiNoteWorkspace('translate', !!input.trim() || !!output).catch(() => {}) }, [!!input.trim(), !!output])
   const [phase, setPhase] = useState<Phase>('idle')
   const [taskId, setTaskId] = useState<string | null>(null)
+  const submitting = useRef(false)
+  const taskRef = useRef<string | null>(null)
+  const cancelingRef = useRef(false)
+  const earlyEvents = useRef<(() => void)[]>([])
   // 约束模板详情（只读弹窗；跟随下拉当前所选）
   const [modeDetail, setModeDetail] = useState<ModePreset | null>(null)
   const [metrics, setMetrics] = useState<{ tokPerSec?: number; firstTokenMs?: number }>({})
@@ -108,13 +115,23 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
   useEffect(() => {
     const offDelta = on(EV.DELTA, (d) => {
       const delta = d as { taskId?: string; text?: string }
-      if (delta.taskId !== taskId) return
+      if (delta.taskId !== taskRef.current) {
+        if (submitting.current && earlyEvents.current.length < 256) earlyEvents.current.push(() => {
+          if (delta.taskId === taskRef.current) setOutput(prev => prev + (delta.text ?? ''))
+        })
+        return
+      }
       setOutput((prev) => prev + (delta.text ?? ''))
       setPhase((p) => (p === 'loading' ? 'streaming' : p))
     })
-    const offDone = on(EV.DONE, (d) => {
+    const handleDone = (d: unknown) => {
       const done = d as { taskId?: string; error?: string; canceled?: boolean; output?: string; tokPerSec?: number; firstTokenMs?: number; offTarget?: boolean; targetSyllables?: number; actualSyllables?: number }
-      if (done.taskId !== taskId) return
+      if (done.taskId !== taskRef.current) {
+        if (submitting.current && earlyEvents.current.length < 256) earlyEvents.current.push(() => handleDone(d))
+        return
+      }
+      taskRef.current = null
+      cancelingRef.current = false
       setTaskId(null)
       if (done.error && !done.canceled) {
         // R17：错误分支也带已产出的部分译文（后端 app.go error 分支附带 output）
@@ -124,8 +141,8 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
         return
       }
       if (done.canceled) {
-        setPhase('idle')
-        setOutput('')
+        if (done.output) setOutput(done.output)
+        setPhase('done')
         return
       }
       setOutput(done.output ?? '')
@@ -135,12 +152,15 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
       setSyl(done.targetSyllables ? { target: done.targetSyllables, actual: done.actualSyllables ?? 0 } : null)
       setPhase('done')
       refreshHistory()
-    })
+    }
+    const offDone = on(EV.DONE, handleDone)
     return () => {
       offDelta()
       offDone()
     }
   }, [taskId, refreshHistory])
+
+  useEffect(() => { useAppStore.setState(s => ({ pageTasks: { ...s.pageTasks, translate: !!taskId || phase === 'loading' } })) }, [taskId, phase])
 
   // 输出区滚动跟随
   useEffect(() => {
@@ -149,7 +169,9 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
 
   const doTranslate = useCallback(() => {
     const text = input.trim()
-    if (!text || taskId) return
+    if (!text || taskId || submitting.current) return
+    submitting.current = true
+    earlyEvents.current = []
     setOutput('')
     setError(null)
     setOffTarget(false)
@@ -169,7 +191,9 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
       syllables: dubbing ? syllables : undefined,
     })
       .then((h) => {
+        taskRef.current = h.taskId
         setTaskId(h.taskId)
+        earlyEvents.current.splice(0).forEach(apply => apply())
         if (sourceLang === 'auto') setDetected('…')
         setRecent((r) => [targetLang, ...r.filter((c) => c !== targetLang)].slice(0, 3))
       })
@@ -177,29 +201,36 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
         setError(String(e?.message ?? e))
         setPhase('error')
       })
+      .finally(() => { submitting.current = false })
   }, [input, sourceLang, targetLang, taskId, cons, dubbing, syllables])
 
   // Ctrl+Enter 翻译 / Esc 取消 / Ctrl+Shift+C 复制译文
   useEffect(() => {
+    if (!active) return
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return
       if (e.ctrlKey && e.key === 'Enter') {
         e.preventDefault()
         doTranslate()
       } else if (e.key === 'Escape' && taskId) {
         e.preventDefault()
-        apiCancelTask(taskId).catch(() => {})
-        setTaskId(null)
-        setPhase('idle')
+        cancelCurrent()
       } else if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
         e.preventDefault()
-        navigator.clipboard.writeText(output).catch(() => {})
-        markCopied('output')
+        copyOutput()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doTranslate, taskId, output])
+  }, [active, doTranslate, taskId, output])
+
+  const cancelCurrent = () => {
+    if (!taskId || cancelingRef.current) return
+    cancelingRef.current = true
+    setPhase('stopping')
+    apiCancelTask(taskId).catch(e => { cancelingRef.current = false; setError(String(e)); setPhase('error') })
+  }
 
   // 复制成功反馈：Check 图标闪现 1.5s
   const markCopied = (which: 'output' | 'both') => {
@@ -212,14 +243,12 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
   }, [])
 
   const copyOutput = () => {
-    navigator.clipboard.writeText(output).catch(() => {})
-    markCopied('output')
+    navigator.clipboard.writeText(output).then(() => markCopied('output')).catch(() => toast.push({ tone: 'error', message: '复制失败，请选中文字后按 Ctrl+C。' }))
   }
 
   // 复制原文与译文（一个按钮，两段一起进剪贴板，空行分隔）
   const dualCopy = () => {
-    navigator.clipboard.writeText(`${input}\n${output}`).catch(() => {})
-    markCopied('both')
+    navigator.clipboard.writeText(`${input}\n${output}`).then(() => markCopied('both')).catch(() => toast.push({ tone: 'error', message: '复制失败，请选中文字后按 Ctrl+C。' }))
   }
 
   const openCons = () => {
@@ -257,7 +286,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
   }
 
   const swap = () => {
-    if (sourceLang === 'auto') return
+    if (sourceLang === 'auto' || taskId || phase === 'loading') return
     const s = sourceLang
     setSourceLang(targetLang)
     setTargetLang(s)
@@ -275,6 +304,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
   }
 
   const openHist = (h: HistItem) => {
+    if (taskId || submitting.current) { toast.push({ tone: 'warn', message: '请先停止当前任务，再打开历史记录。' }); return }
     setCurHistId(h.id)
     setInput(h.sourceText)
     setOutput(h.output)
@@ -388,7 +418,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
       {/* 中央双栏 */}
       <div className="flex flex-col gap-3 min-w-0 min-h-0">
         {/* 语言栏 */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <LangSelect
             langs={langs}
             value={sourceLang}
@@ -396,10 +426,12 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
             isSource
             detected={detected || undefined}
             recent={recent}
+            disabled={!!taskId || phase === 'loading'}
           />
           <button
             type="button"
             title="交换源/目标语言"
+            disabled={!!taskId || phase === 'loading' || sourceLang === 'auto'}
             onClick={swap}
             className={`w-9 h-9 border border-lineStrong text-ink2 grid place-items-center cursor-pointer transition-colors duration-150 hover:border-accent hover:text-accent ${
               sourceLang === 'auto' ? 'opacity-50' : ''
@@ -407,7 +439,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
           >
             <ArrowLeftRight size={15} strokeWidth={2} />
           </button>
-          <LangSelect langs={langs} value={targetLang} onChange={setTargetLang} isSource={false} recent={recent} />
+          <LangSelect langs={langs} value={targetLang} onChange={setTargetLang} isSource={false} recent={recent} disabled={!!taskId || phase === 'loading'} />
           <IconButton icon={<SlidersHorizontal size={15} strokeWidth={2} />} label="翻译约束" onClick={openCons} />
           {/* 翻译模式：领域约束模板下拉（自定义模式在设置页管理） */}
           <label className="flex items-center gap-2 shrink-0 whitespace-nowrap" title={activeModeDesc}>
@@ -468,7 +500,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
         </div>
 
         {/* 约束抽屉（真实 Constraints：Glossary / Hard / Soft / Genre / JSONPreserve） */}
-        <Drawer open={consOpen} onClose={() => setConsOpen(false)} title="翻译约束" width={420}>
+        <Drawer open={active && consOpen} onClose={() => setConsOpen(false)} title="翻译约束" width={420}>
           <div className="flex flex-col gap-5">
             {dubbing && (
               <p className="text-caption text-ink3">
@@ -534,6 +566,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
             </div>
             <textarea
               spellCheck={false}
+              disabled={!!taskId || phase === 'loading'}
               value={input}
               maxLength={8000}
               onChange={(e) => setInput(e.target.value)}
@@ -543,11 +576,11 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
             {/* pt-5 而非 pt-4：textarea 的 :focus-visible 轮廓（2px offset + 2px 宽）
                 会吃掉 4px，补回来才与 pb-4 的下方间距等视觉（实测 16 / 17）。 */}
             <div className="flex gap-2 px-5 pt-5 pb-4">
-              <Button kind="ghost" onClick={() => { setInput(''); setOutput(''); setPhase('idle') }}>
+              <Button kind="ghost" disabled={!!taskId || phase === 'loading'} onClick={() => { setInput(''); setOutput(''); setPhase('idle') }}>
                 <Eraser size={14} strokeWidth={2} />
                 清空
               </Button>
-              <Button kind="ghost" onClick={() => navigator.clipboard.readText().then(setInput).catch(() => {})}>
+              <Button kind="ghost" disabled={!!taskId || phase === 'loading'} onClick={() => navigator.clipboard.readText().then(setInput).catch(() => {})}>
                 <ClipboardPaste size={14} strokeWidth={2} />
                 粘贴
               </Button>
@@ -571,7 +604,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
               ) : null}
               {dubbing && syl && phase === 'done' && (
                 <Badge tone="neutral" dot title="2B 音节控制为近似达标；偏差大可重新生成（temperature 0.3 产出不同表述）">
-                  目标 {syl.target} / 实测 {syl.actual}
+                  目标 {syl.target} / 估算 {syl.actual}
                 </Badge>
               )}
             </div>
@@ -585,7 +618,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
                 </div>
               )}
               {/* R17：错误态保留已产出的部分译文 */}
-              <div className="text-read text-ink1 whitespace-pre-wrap break-words">
+              <div role="region" aria-label="译文文本" className="select-text cursor-text text-read text-ink1 whitespace-pre-wrap break-words">
                 {output}
                 {(phase === 'streaming' || (phase === 'loading' && output)) && <span className="caret" />}
               </div>
@@ -599,19 +632,16 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
                 {copied === 'both' ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={2} />}
                 {copied === 'both' ? '已复制' : '复制原文与译文'}
               </Button>
-              <Button onClick={doTranslate} disabled={!input.trim() || !!taskId} arrow>
+              <Button onClick={doTranslate} disabled={!input.trim() || !!taskId || phase === 'loading'} arrow>
                 <RotateCcw size={14} /> {dubbing ? '重新生成' : '重新翻译'}
               </Button>
               {taskId && (
                 <Button
                   kind="danger"
-                  onClick={() => {
-                    apiCancelTask(taskId).catch(() => {})
-                    setTaskId(null)
-                    setPhase('idle')
-                  }}
+                  disabled={phase === 'stopping'}
+                  onClick={cancelCurrent}
                 >
-                  取消
+                  {phase === 'stopping' ? '正在停止…' : '取消'}
                 </Button>
               )}
             </div>
@@ -619,7 +649,7 @@ export function MainTranslate({ langs }: { langs: Lang[] }) {
         </div>
       </div>
 
-      <ModeDetails preset={modeDetail} open={modeDetail !== null} onClose={() => setModeDetail(null)} />
+      <ModeDetails preset={modeDetail} open={active && modeDetail !== null} onClose={() => setModeDetail(null)} />
     </div>
   )
 }

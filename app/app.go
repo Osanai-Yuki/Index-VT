@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"indexvt/internal/atomicfile"
 	"indexvt/internal/config"
 	"indexvt/internal/csvsanitizer"
 	"indexvt/internal/docpipeline"
@@ -32,23 +34,30 @@ import (
 
 // App 绑定对象。
 type App struct {
-	ctx     context.Context
-	log     *slog.Logger
-	cfg     config.Config
-	cfgMu   sync.RWMutex // 保护 cfg。不变量：cfg 只能经 cfgSnapshot/withCfg 访问（B8）
-	store   *store.Store
-	orch    *orchestrator.Orchestrator
-	models  *modelmanager.Manager
-	tr      *translator.Translator
-	sub     *subtitle.Engine
-	docpipe *docpipeline.Engine
-	version string
-	ready   chan struct{} // OnStartup 装配完成后关闭（Wails OnStartup 晚于前端加载，需门禁）
+	ctx            context.Context
+	log            *slog.Logger
+	logClose       *func() error
+	loggingEnabled bool       // 启动时快照；与应用日志及子进程日志保持一致
+	logsMu         sync.Mutex // 串行化日志打包与清理
+	cfg            config.Config
+	cfgMu          sync.RWMutex // 保护 cfg。不变量：cfg 只能经 cfgSnapshot/withCfg 访问（B8）
+	store          *store.Store
+	orch           *orchestrator.Orchestrator
+	models         *modelmanager.Manager
+	tr             *translator.Translator
+	sub            *subtitle.Engine
+	docpipe        *docpipeline.Engine
+	version        string
+	ready          chan struct{} // OnStartup 装配完成后关闭（Wails OnStartup 晚于前端加载，需门禁）
 
-	mu      sync.Mutex
-	taskSeq int
-	deltas  map[string]*deltaBatcher
-	closing bool
+	mu          sync.Mutex
+	taskSeq     int
+	deltas      map[string]*deltaBatcher
+	closing     bool
+	warmOnce    sync.Once
+	warmErr     error
+	workspace   map[string]bool // 前端仅报告三个工作台是否有会话内容；退出前提示先导出
+	taskCancels map[string]context.CancelFunc
 }
 
 // ensureReady 阻塞等待服务装配完成（最长 30s）。
@@ -164,10 +173,19 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 		cfg.ActiveModel = string(modelmanager.ModelTranslate)
 	}
 	a.withCfg(func(c *config.Config) { *c = cfg })
+	a.loggingEnabled = cfg.LoggingEnabled
+	a.logClose = setupLogger(cfg.LoggingEnabled)
+	log = slog.Default()
+	a.log = log
 
 	// 编排器
 	a.orch = orchestrator.New(a, orchestrator.Callbacks{
 		OnBeforeStop: func(reason string) {
+			// EnsureRunning 仅在没有其他活跃任务时才允许热切换。
+			// 此时新队列已注册，不能把触发加载的队列一并取消。
+			if reason == "hot-switch" {
+				return
+			}
 			// 回调在 orch.Start() 之后才会触发；仍做 nil 防护，因为装配顺序易被后续改动破坏。
 			if a.tr != nil {
 				a.tr.CancelAll() // 取消所有任务上下文（断开 SSE，02 文档 §6.2）
@@ -175,13 +193,23 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 			if a.sub != nil {
 				a.sub.CancelAllQueues()
 			}
+			if a.docpipe != nil {
+				a.docpipe.CancelAll()
+			}
 			a.mu.Lock()
+			cancels := make([]context.CancelFunc, 0, len(a.taskCancels))
+			for _, cancel := range a.taskCancels {
+				cancels = append(cancels, cancel)
+			}
 			pending := make([]*deltaBatcher, 0, len(a.deltas))
 			for id, b := range a.deltas {
 				delete(a.deltas, id)
 				pending = append(pending, b)
 			}
 			a.mu.Unlock()
+			for _, cancel := range cancels {
+				cancel()
+			}
 			// close 幂等（sync.Once）且 done 通道保证排空与顺序，与"在哪个 goroutine 等"无关。
 			// 这里必须 go 出去：OnBeforeStop 由持 opMu 的 stopProcLocked 调用，而 close 会等到
 			// 最终 flushNow → runtime.EventsEmit；同步等待即等于"持 opMu 期间跨 JS 桥 emit"，
@@ -218,8 +246,11 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 			if err != nil {
 				return "", "", err
 			}
-			ep, err := a.orch.TaskBegin(path, modelID)
+			ep, err := a.orch.TaskBeginContext(ctx, path, modelID)
 			if err != nil {
+				if ctx.Err() != nil {
+					return "", "", translator.ErrCanceled
+				}
 				return "", "", err
 			}
 			return ep.BaseURL, path, nil
@@ -245,10 +276,16 @@ func (a *App) startup(ctx context.Context, log *slog.Logger, version string, cle
 	// 字幕引擎（单条翻译桥接）
 	subtitle.SetOffTargetChecker(translator.DetectOffTarget)
 	a.sub = subtitle.NewEngine(func(ctx context.Context, text, sourceLang, targetLang string) (string, error) {
+		terms := subtitle.GlossaryFromContext(ctx)
+		glossary := make([]translator.GlossaryItem, len(terms))
+		for i, it := range terms {
+			glossary[i] = translator.GlossaryItem{Term: it.Term, Translation: it.Translation}
+		}
 		return a.tr.TranslateSync(ctx, translator.TranslateRequest{
-			SourceLang: sourceLang,
-			TargetLang: targetLang,
-			Text:       text,
+			SourceLang:  sourceLang,
+			TargetLang:  targetLang,
+			Text:        text,
+			Constraints: &translator.Constraints{Glossary: glossary},
 		})
 	})
 
@@ -295,8 +332,9 @@ func (a *App) sourcePref() string { return string(a.cfgSnapshot().Download.Sourc
 // 由编排内部（args.go 的 buildArgs、idleWatch）调用，装配期也可能读取：
 // 只做快照、不加 ensureReady 门禁 —— a.cfg 是值类型，零值即合法默认配置，
 // 门禁反而会让编排协程空等 30s。
-func (a *App) NGLOverride() int { return a.cfgSnapshot().Inference.NGLOverride }
-func (a *App) CtxTokens() int64 { return a.cfgSnapshot().EffectiveCtxTokens() }
+func (a *App) NGLOverride() int     { return a.cfgSnapshot().Inference.NGLOverride }
+func (a *App) LoggingEnabled() bool { return a.loggingEnabled }
+func (a *App) CtxTokens() int64     { return a.cfgSnapshot().EffectiveCtxTokens() }
 
 // ---------- 上下文显存估算 ----------
 
@@ -473,7 +511,12 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 			"taskId": taskID, "text": text,
 		})
 	})
+	taskCtx, cancel := context.WithCancel(a.ctx)
 	a.mu.Lock()
+	if a.taskCancels == nil {
+		a.taskCancels = map[string]context.CancelFunc{}
+	}
+	a.taskCancels[taskID] = cancel
 	a.deltas[taskID] = batcher
 	a.mu.Unlock()
 
@@ -481,7 +524,6 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 		start := time.Now()
 		// 任务 ctx 必须受应用生命周期约束。旧写法 context.Background() 意味着
 		// 挂死的推理请求永远无法被回收，activeTasks 永久 >0 → 空闲卸载永不触发（B23）。
-		taskCtx, cancel := context.WithCancel(a.ctx)
 		defer cancel()
 
 		// R17：累积已产出的部分译文——错误分支也要带给前端（error 态渲染部分译文 + 错误提示）
@@ -502,6 +544,7 @@ func (a *App) Translate(req TranslateRequestUI) (TaskHandle, error) {
 		batcher.close()
 		a.mu.Lock()
 		delete(a.deltas, taskID)
+		delete(a.taskCancels, taskID)
 		a.mu.Unlock()
 
 		done := map[string]any{
@@ -550,6 +593,13 @@ func (a *App) trModelName(mode translator.ModeKind) string {
 func (a *App) CancelTask(taskID string) error {
 	if err := a.ensureReady(); err != nil {
 		return err
+	}
+	a.mu.Lock()
+	cancel := a.taskCancels[taskID]
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+		return nil
 	}
 	return a.tr.CancelActive(taskID)
 }
@@ -633,6 +683,21 @@ func (a *App) ExportGlossaryCSV(id int64) (string, error) {
 	return "", fmt.Errorf("术语本 %d 不存在", id)
 }
 
+func (a *App) SaveGlossaryCSV(id int64) (string, error) {
+	text, err := a.ExportGlossaryCSV(id)
+	if err != nil {
+		return "", err
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{Title: "导出术语本", DefaultFilename: "glossary.csv", Filters: []runtime.FileFilter{{DisplayName: "CSV", Pattern: "*.csv"}}})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := atomicfile.Write(path, []byte(text)); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // ---------- 模型 ----------
 
 func (a *App) ListModels() ([]modelmanager.ModelInfo, error) {
@@ -640,6 +705,13 @@ func (a *App) ListModels() ([]modelmanager.ModelInfo, error) {
 		return nil, err
 	}
 	return a.models.List(), nil
+}
+
+func (a *App) GetDownloadLocation() (modelmanager.DownloadLocation, error) {
+	if err := a.ensureReady(); err != nil {
+		return modelmanager.DownloadLocation{}, err
+	}
+	return modelmanager.GetDownloadLocation(), nil
 }
 
 func (a *App) ListUnknownModels() ([]modelmanager.ModelInfo, error) {
@@ -675,6 +747,9 @@ func (a *App) SetActiveModel(id string) error {
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
+	if a.sub.HasActiveQueue() || a.docpipe.HasActiveQueue() {
+		return fmt.Errorf("请先结束字幕/文档任务，再切换模型")
+	}
 	if err := a.models.SetActive(modelmanager.ModelID(id)); err != nil {
 		return err
 	}
@@ -696,6 +771,27 @@ func (a *App) KeepAlive() {
 	a.orch.KeepAlive()
 }
 
+// WarmDefaultModel 由前端就绪后调用：预加载保存的默认模型和上下文，不阻塞窗口创建。
+// StrictMode 或重复桥接调用共享同一次预加载；退出后的 EnsureRunning 拒绝重启。
+func (a *App) WarmDefaultModel() error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	a.warmOnce.Do(func() {
+		cfg := a.cfgSnapshot()
+		path, _, err := a.models.ResolveModelPath(modelmanager.ModelID(cfg.ActiveModel))
+		if err != nil {
+			a.warmErr = err
+			return
+		}
+		_, a.warmErr = a.orch.TaskBegin(path, cfg.ActiveModel)
+		if a.warmErr == nil {
+			a.orch.TaskDone()
+		}
+	})
+	return a.warmErr
+}
+
 func (a *App) AssignUnknown(path, id, quant string) (modelmanager.ModelInfo, error) {
 	if err := a.ensureReady(); err != nil {
 		return modelmanager.ModelInfo{}, err
@@ -707,16 +803,19 @@ func (a *App) AssignUnknown(path, id, quant string) (modelmanager.ModelInfo, err
 
 // SystemStatus 状态栏聚合数据。
 type SystemStatus struct {
-	Orchestration string                   `json:"orchestration"`
-	ActiveModel   string                   `json:"activeModel"`
-	Port          int                      `json:"port"`
-	GPU           envprobe.GPU             `json:"gpu"`
-	IdleMinutes   int                      `json:"idleMinutes"`
-	IdleSeconds   int                      `json:"idleSeconds"`
-	ActiveTasks   int                      `json:"activeTasks"`
-	Version       string                   `json:"version"`
-	Offline       bool                     `json:"offline"`
-	Models        []modelmanager.ModelInfo `json:"models"`
+	Orchestration      string                   `json:"orchestration"`
+	ActiveModel        string                   `json:"activeModel"`
+	RunningModel       string                   `json:"runningModel"`
+	LoadedCtxTokens    int64                    `json:"loadedCtxTokens"`
+	Port               int                      `json:"port"`
+	GPU                envprobe.GPU             `json:"gpu"`
+	IdleMinutes        int                      `json:"idleMinutes"`
+	IdleSeconds        int                      `json:"idleSeconds"`
+	IdleReleaseSeconds int                      `json:"idleReleaseSeconds"` // -1=未倒计时
+	ActiveTasks        int                      `json:"activeTasks"`
+	Version            string                   `json:"version"`
+	Offline            bool                     `json:"offline"`
+	Models             []modelmanager.ModelInfo `json:"models"`
 }
 
 // GetSystemStatus 状态组（01 文档 §7.1）。
@@ -731,16 +830,19 @@ func (a *App) GetSystemStatus() (*SystemStatus, error) {
 	models := a.models.List()
 	c := a.cfgSnapshot()
 	return &SystemStatus{
-		Orchestration: string(a.orch.State()),
-		ActiveModel:   c.ActiveModel,
-		Port:          a.EndpointPort(),
-		GPU:           gpu,
-		IdleMinutes:   c.Resource.IdleUnloadMinutes,
-		IdleSeconds:   a.orch.IdleSeconds(),
-		ActiveTasks:   a.orch.ActiveTasks(),
-		Version:       a.version,
-		Offline:       false, // 模型就绪后零网络请求；离线徽标常显
-		Models:        models,
+		Orchestration:      string(a.orch.State()),
+		ActiveModel:        c.ActiveModel,
+		RunningModel:       a.orch.CurrentModel(),
+		LoadedCtxTokens:    a.orch.LoadedCtxTokens(),
+		Port:               a.EndpointPort(),
+		GPU:                gpu,
+		IdleMinutes:        c.Resource.IdleUnloadMinutes,
+		IdleSeconds:        a.orch.IdleSeconds(),
+		IdleReleaseSeconds: a.orch.IdleReleaseSeconds(),
+		ActiveTasks:        a.orch.ActiveTasks(),
+		Version:            a.version,
+		Offline:            false, // 模型就绪后零网络请求；离线徽标常显
+		Models:             models,
 	}, nil
 }
 
@@ -763,12 +865,20 @@ func (a *App) SetConfig(cfg config.Config) error {
 		return err
 	}
 	cfg.Normalize()
+	old := a.cfgSnapshot()
+	if (cfg.Inference != old.Inference || cfg.ActiveModel != old.ActiveModel) && a.tasksBusy() {
+		return fmt.Errorf("任务进行中，请结束任务后修改推理参数；外观设置仍可修改")
+	}
 	if !modelmanager.ValidModelID(cfg.ActiveModel) {
 		cfg.ActiveModel = string(modelmanager.ModelTranslate)
 	}
 	a.withCfg(func(c *config.Config) { *c = cfg })
 	// 持久化在锁外进行：数据库 I/O 不得占用 cfgMu。
 	return a.store.SetConfig("app", cfg)
+}
+
+func (a *App) tasksBusy() bool {
+	return (a.orch != nil && a.orch.ActiveTasks() > 0) || (a.sub != nil && a.sub.HasActiveQueue()) || (a.docpipe != nil && a.docpipe.HasActiveQueue())
 }
 
 // ---------- 字幕 ----------
@@ -796,6 +906,11 @@ func (a *App) SubOpen() (*subtitle.SubtitleDoc, error) {
 // SubTranslate 启动翻译队列。
 func (a *App) SubTranslate(docID string, opt subtitle.QueueOptions) error {
 	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	var err error
+	opt, err = a.subtitleOptions(opt)
+	if err != nil {
 		return err
 	}
 	return a.sub.TranslateQueue(docID, opt, func(p subtitle.CueProgress) {
@@ -829,6 +944,11 @@ func (a *App) SubRetryFailed(docID string, opt subtitle.QueueOptions) error {
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
+	var err error
+	opt, err = a.subtitleOptions(opt)
+	if err != nil {
+		return err
+	}
 	return a.sub.RetryFailed(docID, opt, func(p subtitle.CueProgress) {
 		runtime.EventsEmit(a.ctx, "subtitle:cue", p)
 	})
@@ -838,9 +958,26 @@ func (a *App) SubRetryCues(docID string, ids []int, opt subtitle.QueueOptions) e
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
+	var err error
+	opt, err = a.subtitleOptions(opt)
+	if err != nil {
+		return err
+	}
 	return a.sub.RetryCues(docID, ids, opt, func(p subtitle.CueProgress) {
 		runtime.EventsEmit(a.ctx, "subtitle:cue", p)
 	})
+}
+
+func (a *App) subtitleOptions(opt subtitle.QueueOptions) (subtitle.QueueOptions, error) {
+	items, err := a.loadGlossary(opt.GlossaryID)
+	if err != nil {
+		return opt, err
+	}
+	opt.Terms = make([]subtitle.GlossaryTerm, len(items))
+	for i, it := range items {
+		opt.Terms[i] = subtitle.GlossaryTerm{Term: it.Term, Translation: it.Translation}
+	}
+	return opt, nil
 }
 
 // SubGetDoc 返回文档权威快照。用于：队列结束后一次性校准、事件丢包兜底、
@@ -853,13 +990,13 @@ func (a *App) SubGetDoc(docID string) (*subtitle.SubtitleDoc, error) {
 }
 
 // SubExport 导出（弹出保存对话框）。
-func (a *App) SubExport(docID string, opt subtitle.ExportOptions) error {
+func (a *App) SubExport(docID string, opt subtitle.ExportOptions) (string, error) {
 	if err := a.ensureReady(); err != nil {
-		return err
+		return "", err
 	}
 	doc, err := a.sub.GetDoc(docID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	base := strings.TrimSuffix(filepath.Base(doc.Path), filepath.Ext(doc.Path))
 	ext := string(opt.Format)
@@ -875,24 +1012,42 @@ func (a *App) SubExport(docID string, opt subtitle.ExportOptions) error {
 		},
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if path == "" {
-		return nil
+		return "", nil
 	}
 	opt.OutPath = path
-	if err := a.sub.Export(docID, opt); err != nil {
-		return err
-	}
-	// keep-original：原文另存（02 文档 §5.4 三模式）
 	if opt.Bilingual == subtitle.BilingualKeepOriginal {
-		origOpt := opt
-		origOpt.Bilingual = subtitle.BilingualTranslationOnly
-		origOpt.OutPath = strings.TrimSuffix(path, filepath.Ext(path)) + ".orig." + ext
-		// 双语导出中仅译文文件已写为译文；原文另存需原文内容
-		return a.sub.ExportOriginal(docID, origOpt)
+		secondary := strings.TrimSuffix(path, filepath.Ext(path)) + ".orig." + ext
+		if _, err := os.Stat(secondary); err == nil {
+			choice, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{Type: runtime.QuestionDialog, Title: "确认同时替换原文副本", Message: "另外的原文文件已存在：" + secondary + "。继续将同时替换两个导出文件。", Buttons: []string{"取消", "替换两个文件"}, DefaultButton: "取消", CancelButton: "取消"})
+			if err != nil {
+				return "", err
+			}
+			if choice != "替换两个文件" {
+				return "", nil
+			}
+		}
 	}
-	return nil
+	if err := a.sub.ExportFiles(docID, opt); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (a *App) SubUndo(id string, redo bool) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.Undo(id, redo)
+}
+
+func (a *App) SubShiftCue(id string, index int, field string, delta int64) (*subtitle.SubtitleDoc, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.sub.ShiftCue(id, index, field, delta)
 }
 
 // ---------- 字幕编辑（M4） ----------
@@ -1015,7 +1170,7 @@ func (a *App) DocPick() (*DocPickResult, error) {
 	if path == "" {
 		return nil, nil // 用户取消
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := readDocument(path)
 	if err != nil {
 		return nil, err
 	}
@@ -1033,7 +1188,7 @@ func (a *App) DocTranslate(req DocRequestUI) (string, error) {
 		return "", err
 	}
 	dir := translator.NailongDirection(req.Direction)
-	raw, err := os.ReadFile(req.Path)
+	raw, err := readDocument(req.Path)
 	if err != nil {
 		return "", err
 	}
@@ -1053,12 +1208,43 @@ func (a *App) DocTranslate(req DocRequestUI) (string, error) {
 	return docID, nil
 }
 
+func readDocument(path string) ([]byte, error) {
+	const maxBytes = 2 << 20
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxBytes {
+		return nil, fmt.Errorf("文档文件超过2MiB或不是普通文件，请拆分为50000字以内的文本")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxBytes {
+		return nil, fmt.Errorf("读取时文件增大，请拆分后重新导入")
+	}
+	return data, nil
+}
+
 // DocResume 续跑：只重翻 pending/failed 块，done 保留（取消/失败后的恢复路径）。
 func (a *App) DocResume(docID string) error {
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
 	return a.docRun(docID)
+}
+
+func (a *App) DocRestart(docID string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	return a.docpipe.Restart(docID, func(p docpipeline.DocProgress) { runtime.EventsEmit(a.ctx, "doc:progress", p) }, func(r docpipeline.DocDone) { runtime.EventsEmit(a.ctx, "doc:done", r) })
 }
 
 // docRun 启动队列并把管线事件桥到 Wails 事件总线。
@@ -1120,10 +1306,62 @@ func (a *App) DocExport(docID string, kind string) (string, error) {
 	if path == "" {
 		return "", nil // 用户取消
 	}
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+	if err := atomicfile.ProtectSource(doc.Path, path); err != nil {
+		return "", err
+	}
+	if err := atomicfile.Write(path, []byte(text)); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func (a *App) RevealFile(path string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("文件不存在或无法访问：%w", err)
+	}
+	return exec.Command("explorer.exe", "/select,", filepath.Clean(path)).Start()
+}
+
+func (a *App) NoteWorkspace(page string, dirty bool) {
+	if a.ensureReady() != nil {
+		return
+	}
+	if page != "translate" && page != "doc" && page != "subtitle" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.workspace == nil {
+		a.workspace = map[string]bool{}
+	}
+	a.workspace[page] = dirty
+}
+
+func (a *App) ConfirmExit() (bool, error) {
+	return a.confirmExit(runtime.MessageDialog)
+}
+
+func (a *App) confirmExit(showDialog func(context.Context, runtime.MessageDialogOptions) (string, error)) (bool, error) {
+	if err := a.ensureReady(); err != nil {
+		return false, err
+	}
+	a.mu.Lock()
+	closing := a.closing
+	unsaved := false
+	for _, dirty := range a.workspace {
+		unsaved = unsaved || dirty
+	}
+	a.mu.Unlock()
+	if closing || !unsaved {
+		return true, nil
+	}
+	// Windows QuestionDialog 忽略自定义按钮文案，只返回 "Yes" / "No"。
+	// 同时使用原生支持的按钮值，确保默认焦点落在不退出的一项。
+	button, err := showDialog(a.ctx, runtime.MessageDialogOptions{Type: runtime.QuestionDialog, Title: "关闭前请保存工作台内容", Message: "工作台草稿与字幕/文档会话在关闭后不会恢复。请先返回复制或导出需要保留的内容；历史记录不受影响。仍要退出吗？", Buttons: []string{"Yes", "No"}, DefaultButton: "No", CancelButton: "No"})
+	return err == nil && button == "Yes", err
 }
 
 // loadGlossary 术语本加载（与主翻译台绑定共用 store 读取路径）。
@@ -1144,7 +1382,7 @@ func (a *App) loadGlossary(id int64) ([]translator.GlossaryItem, error) {
 			return items, nil
 		}
 	}
-	return nil, nil
+	return nil, fmt.Errorf("术语本 %d 已不存在，请重新选择", id)
 }
 
 // ---------- 应用 ----------
@@ -1168,6 +1406,8 @@ func openExplorer(dir string) error {
 // 返回值为 zip 路径 + 说明文案，前端（Settings.tsx）直接展示该字符串。
 // 推理日志 llama-server.out.log 默认不打包 —— 可能含提示词原文（logs.go 排除表）。
 func (a *App) CollectLogs() (string, error) {
+	a.logsMu.Lock()
+	defer a.logsMu.Unlock()
 	p, err := a.collectLogsZip()
 	if err != nil {
 		return "", err

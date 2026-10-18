@@ -63,7 +63,8 @@ const status = () => ({
   activeModel: 'translate',
   port: 8101,
   gpu,
-  idleMinutes: 5,
+  idleMinutes: 30,
+  idleReleaseSeconds: -1,
   idleSeconds: 187,
   activeTasks: 1,
   version: 'dev-mock',
@@ -73,10 +74,11 @@ const status = () => ({
 
 let cfg = {
   inference: { nglOverride: -1, ctxTier: '8K', cpuThreads: 0, tempOverride: false },
-  resource: { idleUnloadMinutes: 5, closeBehavior: 'exit-release' },
+  resource: { idleUnloadMinutes: 30, closeBehavior: 'exit-release' },
   download: { sourcePref: 'auto' },
   appearance: { theme: 'system', fontSize: 'standard' },
   history: { maxEntries: 2000 },
+  loggingEnabled: false,
   onboarded: true,
   activeModel: 'translate',
 }
@@ -146,7 +148,7 @@ const history = () =>
     starred: i === 1 || i === 4,
   }))
 
-const glossaries = () => [
+let glossaryBooks = [
   {
     id: 1,
     name: '人名库',
@@ -164,6 +166,8 @@ const glossaries = () => [
     ],
   },
 ]
+
+const glossaries = () => structuredClone(glossaryBooks)
 
 const unknownModels = () => [
   {
@@ -361,6 +365,10 @@ function emitTranslateDemo(taskId: string, syl: { target: number; actual: number
 
 const handlers: Record<string, (...args: never[]) => unknown> = {
   GetSystemStatus: () => status(),
+  GetDownloadLocation: () => ({ path: 'models/', freeBytes: 100 * (1 << 30), known: true }),
+  NoteWorkspace: () => undefined,
+  ConfirmExit: () => true,
+  RevealFile: () => undefined,
   ListModels: () => models(),
   ListUnknownModels: () => unknownModels(),
   AssignUnknown: () => models()[0],
@@ -371,6 +379,7 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
     cfg = { ...cfg, activeModel: id as unknown as string }
   },
   KeepAlive: () => undefined,
+  WarmDefaultModel: () => undefined,
   GetConfig: () => cfg,
   SetConfig: (patch: never) => {
     cfg = { ...cfg, ...(patch as unknown as typeof cfg) }
@@ -402,8 +411,14 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
   StarHistory: () => undefined,
   ClearHistory: () => undefined,
   ListGlossaries: () => glossaries(),
-  SaveGlossary: () => 3,
-  DeleteGlossary: () => undefined,
+  SaveGlossary: (input: never) => {
+    const book = structuredClone(input) as unknown as { id: number; name: string; items: { term: string; translation: string }[] }
+    if (!book.id) book.id = Math.max(0, ...glossaryBooks.map(g => g.id)) + 1
+    glossaryBooks = [...glossaryBooks.filter(g => g.id !== book.id), book]
+    return book.id
+  },
+  DeleteGlossary: (id: never) => { glossaryBooks = glossaryBooks.filter(g => g.id !== Number(id)) },
+  SaveGlossaryCSV: () => 'models/exports/glossary.csv',
   ExportGlossaryCSV: () => 'models/exports/mock-glossary.csv',
   ProbeEnv: () => ({
     gpu,
@@ -438,7 +453,14 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
   SubCancelQueue: () => undefined,
   SubRetryFailed: () => undefined,
   SubRetryCues: () => undefined,
-  SubExport: () => undefined,
+  SubExport: () => 'models/exports/mock.srt',
+  SubShiftCue: (_id: never, index: never, field: never, delta: never) => {
+    const cue = subDoc.cues[Number(index) - 1]
+    if (cue && field === 'startMs') cue.startMs = Math.max(0, Math.min(cue.endMs - 1, cue.startMs + Number(delta)))
+    if (cue && field === 'endMs') cue.endMs = Math.max(cue.startMs + 1, cue.endMs + Number(delta))
+    return subSnapshot()
+  },
+  SubUndo: () => subSnapshot(),
   /* ── M4 字幕编辑（10 个绑定）。越界/非法入参按当前快照原样返回
         （真实后端走报错路径；mock 保持 resolve，页面不闪退）── */
   SubUpdateCue: (_docId: never, index: never, patch: never) => {
@@ -617,10 +639,12 @@ const handlers: Record<string, (...args: never[]) => unknown> = {
     return 'mock-doc-1'
   },
   DocResume: () => undefined,
+  DocRestart: () => { docDemoDone = false; setTimeout(() => emitDocDemo('mock-doc-1'), 100) },
   DocCancel: () => undefined,
   DocGetDoc: (docId: never) => ({ ...mockDocSnapshot(), id: (docId as unknown as string) ?? 'mock-doc-1' }),
   DocExport: () => 'models/exports/mock-translation.txt',
   CollectLogs: () => 'logs/mock-bundle.zip',
+  ClearLogs: () => ({ removed: 2, skipped: [] }),
   OpenModelsFolder: () => undefined,
   OpenLogsFolder: () => undefined,
   PrepareExit: () => undefined,

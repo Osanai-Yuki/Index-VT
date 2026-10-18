@@ -27,6 +27,15 @@ logs/
 # SDD 工作区（git-ignored scratch）
 .superpowers/
 
+# 字体工具链的一次性工作区：上游字体原始文件（~28 MB，Archivo / Noto Sans SC /
+# JetBrains Mono 变量字体）、候选子集、样张 HTML 与截图。全部可由
+# tools/fonts/ 下的脚本重跑再生（下载地址见各脚本 docstring），入库没有意义。
+# 入库的是 tools/fonts/charsets/*.txt（覆盖合同）与 tools/fonts/*.py（生成方式）。
+.font-work/
+
+# Windows 文件权限诊断的一次性恢复记录（DSH 沙箱工具产物，可重跑再生）
+.acl-recovery/
+
 # Spike 产物：语料 + 模型原始输出 + 一次性探针脚本（~921 KB，可重跑再生）。
 # 与 docs/superpowers/{specs,plans} 的区别：那两处是长期规格，入库；这里是生成物，只留在本机。
 # 因此 docs/01 §3.2 与 m5-longdoc 可行性文档里对该目录的引用在干净克隆中会落空，
@@ -34,3 +43,22 @@ logs/
 docs/superpowers/spikes/
 # Local Pi runtime state
 .atl/
+
+# 本地开发助手配置与会话记录
+.claude/
+.codex/
+.cursor/
+.gemini/
+.aider*
+.clinerules/
+.roo/
+.windsurf/
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md
+
+# 本地发布暂存与分发包
+/release/

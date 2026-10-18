@@ -1,0 +1,19 @@
+﻿{
+    "started":  "2026-10-17T13:58:56.5608370Z",
+    "checks":  [
+                   "Startup creates llama-server and loads the default model without a translation request",
+                   "Real engine /health returns ok",
+                   "Normal close while idle releases engine process and health endpoint"
+               ],
+    "ok":  true,
+    "readyMs":  6305,
+    "applicationPid":  26228,
+    "enginePid":  7936,
+    "engineCommandLine":  "E:\\Code_Projects\\Go\\Index-VT_GUI\\thirdparty\\llama-server\\llama-server.exe -m E:\\Code_Projects\\Go\\Index-VT_GUI\\models\\Index-Translate-2B.Q4_K_M.gguf --host 127.0.0.1 --port 8101 -c 8192 -fa on --no-webui --parallel 1 -ngl 99",
+    "health":  {
+                   "status":  "ok"
+               },
+    "port":  8101,
+    "contextTokens":  8192,
+    "modelFile":  "Index-Translate-2B.Q4_K_M.gguf"
+}

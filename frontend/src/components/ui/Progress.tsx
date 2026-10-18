@@ -4,6 +4,7 @@ export interface ProgressProps {
   pct: number
   tone?: 'accent' | 'ok' | 'warn'
   label: string
+  indeterminate?: boolean
 }
 
 const TONE_BG: Record<NonNullable<ProgressProps['tone']>, string> = {
@@ -12,20 +13,21 @@ const TONE_BG: Record<NonNullable<ProgressProps['tone']>, string> = {
   warn: 'bg-warn',
 }
 
-export function Progress({ pct, tone = 'accent', label }: ProgressProps) {
+export function Progress({ pct, tone = 'accent', label, indeterminate = false }: ProgressProps) {
   const clamped = Math.min(100, Math.max(0, pct))
   return (
     <div
       role="progressbar"
       aria-label={label}
-      aria-valuenow={Math.round(clamped)}
+      aria-valuenow={indeterminate ? undefined : Math.round(clamped)}
+      aria-valuetext={indeterminate ? '总大小未知，正在下载' : undefined}
       aria-valuemin={0}
       aria-valuemax={100}
       className="h-1 w-full overflow-hidden bg-sunken"
     >
       <div
         className={`h-full transition-transform duration-(--suj-dur-standard) ease-(--suj-ease-signature) ${TONE_BG[tone]}`}
-        style={{ transform: `scaleX(${clamped / 100})`, transformOrigin: 'left' }}
+        style={{ transform: `scaleX(${indeterminate ? 0.35 : clamped / 100})`, transformOrigin: 'left' }}
       />
     </div>
   )

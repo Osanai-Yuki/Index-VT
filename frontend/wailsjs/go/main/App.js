@@ -26,8 +26,16 @@ export function ClearHistory() {
   return window['go']['main']['App']['ClearHistory']();
 }
 
+export function ClearLogs() {
+  return window['go']['main']['App']['ClearLogs']();
+}
+
 export function CollectLogs() {
   return window['go']['main']['App']['CollectLogs']();
+}
+
+export function ConfirmExit() {
+  return window['go']['main']['App']['ConfirmExit']();
 }
 
 export function CtxTokens() {
@@ -70,6 +78,10 @@ export function DocPick() {
   return window['go']['main']['App']['DocPick']();
 }
 
+export function DocRestart(arg1) {
+  return window['go']['main']['App']['DocRestart'](arg1);
+}
+
 export function DocResume(arg1) {
   return window['go']['main']['App']['DocResume'](arg1);
 }
@@ -96,6 +108,10 @@ export function ExportGlossaryCSV(arg1) {
 
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
+}
+
+export function GetDownloadLocation() {
+  return window['go']['main']['App']['GetDownloadLocation']();
 }
 
 export function GetLanguages() {
@@ -134,8 +150,16 @@ export function ListUnknownModels() {
   return window['go']['main']['App']['ListUnknownModels']();
 }
 
+export function LoggingEnabled() {
+  return window['go']['main']['App']['LoggingEnabled']();
+}
+
 export function NGLOverride() {
   return window['go']['main']['App']['NGLOverride']();
+}
+
+export function NoteWorkspace(arg1, arg2) {
+  return window['go']['main']['App']['NoteWorkspace'](arg1, arg2);
 }
 
 export function OpenLogsFolder() {
@@ -158,8 +182,16 @@ export function Quit() {
   return window['go']['main']['App']['Quit']();
 }
 
+export function RevealFile(arg1) {
+  return window['go']['main']['App']['RevealFile'](arg1);
+}
+
 export function SaveGlossary(arg1) {
   return window['go']['main']['App']['SaveGlossary'](arg1);
+}
+
+export function SaveGlossaryCSV(arg1) {
+  return window['go']['main']['App']['SaveGlossaryCSV'](arg1);
 }
 
 export function SearchHistory(arg1) {
@@ -242,6 +274,10 @@ export function SubShiftAll(arg1, arg2) {
   return window['go']['main']['App']['SubShiftAll'](arg1, arg2);
 }
 
+export function SubShiftCue(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SubShiftCue'](arg1, arg2, arg3, arg4);
+}
+
 export function SubSplitCue(arg1, arg2, arg3) {
   return window['go']['main']['App']['SubSplitCue'](arg1, arg2, arg3);
 }
@@ -254,10 +290,18 @@ export function SubTranslate(arg1, arg2) {
   return window['go']['main']['App']['SubTranslate'](arg1, arg2);
 }
 
+export function SubUndo(arg1, arg2) {
+  return window['go']['main']['App']['SubUndo'](arg1, arg2);
+}
+
 export function SubUpdateCue(arg1, arg2, arg3) {
   return window['go']['main']['App']['SubUpdateCue'](arg1, arg2, arg3);
 }
 
 export function Translate(arg1) {
   return window['go']['main']['App']['Translate'](arg1);
+}
+
+export function WarmDefaultModel() {
+  return window['go']['main']['App']['WarmDefaultModel']();
 }

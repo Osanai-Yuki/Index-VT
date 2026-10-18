@@ -58,10 +58,10 @@ type Event struct {
 
 // Settings 提供编排所需的用户设置视图（app 层实现，解耦 config）。
 type Settings interface {
-	NGLOverride() int  // -1=自动
-	CtxTokens() int64  // -c
-	CPUThreads() int   // 0=自动
-	IdleMinutes() int  // 0=常驻
+	NGLOverride() int // -1=自动
+	CtxTokens() int64 // -c
+	CPUThreads() int  // 0=自动
+	IdleMinutes() int // 0=常驻
 }
 
 // Callbacks app 层注入的编排回调。
@@ -93,11 +93,14 @@ type Orchestrator struct {
 	// pendingHandle：cleanupProcLocked 在 500ms 内等不到 watcherDone 时，把
 	// procHandle 所有权移交 watcher，由其退出路径关闭。用 atomic 而非 opMu：
 	// cleanup 持 opMu 等待 watcherDone，watcher 若需要 opMu 才能收尾就会死锁。
-	pendingHandle atomic.Uintptr
-	endpoint      Endpoint
-	modelPath     string
-	modelID       string
-	port          int
+	pendingHandle   atomic.Uintptr
+	endpoint        Endpoint
+	modelPath       string
+	modelID         string
+	port            int
+	loadedCtxTokens int64
+	loadedNGLPolicy int
+	loadedThreads   int
 
 	quit      chan struct{}
 	closeOnce sync.Once
@@ -106,6 +109,7 @@ type Orchestrator struct {
 	taskMu       sync.Mutex
 	activeTasks  int
 	lastDoneNano atomic.Int64
+	warningAt    time.Time // taskMu 保护；零值表示尚未提示释放倒计时
 }
 
 func New(set Settings, cb Callbacks, log *slog.Logger) *Orchestrator {
@@ -177,13 +181,41 @@ func (o *Orchestrator) waitWhileStoppingLocked(timeout time.Duration) bool {
 func (o *Orchestrator) TaskBegin(modelPath, modelID string) (Endpoint, error) {
 	o.taskMu.Lock()
 	o.activeTasks++
+	o.warningAt = time.Time{}
 	o.taskMu.Unlock()
+	o.emit(Event{Kind: "notice", Text: "idle-reset"})
 	ep, err := o.EnsureRunning(modelPath, modelID)
 	if err != nil {
 		o.TaskDone()
 		return Endpoint{}, err
 	}
 	return ep, nil
+}
+
+// TaskBeginContext lets one request stop waiting without terminating a shared engine preload.
+// If loading finishes after cancellation, its task count is balanced by the late-result reaper.
+func (o *Orchestrator) TaskBeginContext(ctx context.Context, modelPath, modelID string) (Endpoint, error) {
+	if err := ctx.Err(); err != nil {
+		return Endpoint{}, err
+	}
+	type result struct {
+		endpoint Endpoint
+		err      error
+	}
+	ready := make(chan result, 1)
+	go func() { ep, err := o.TaskBegin(modelPath, modelID); ready <- result{ep, err} }()
+	select {
+	case r := <-ready:
+		return r.endpoint, r.err
+	case <-ctx.Done():
+		go func() {
+			r := <-ready
+			if r.err == nil {
+				o.TaskDone()
+			}
+		}()
+		return Endpoint{}, ctx.Err()
+	}
 }
 
 func (o *Orchestrator) TaskDone() {
@@ -203,6 +235,12 @@ func (o *Orchestrator) ActiveTasks() int {
 	return o.activeTasks
 }
 
+func (o *Orchestrator) LoadedCtxTokens() int64 {
+	o.opMu.Lock()
+	defer o.opMu.Unlock()
+	return o.loadedCtxTokens
+}
+
 // IdleSeconds 运行中已空闲秒数（状态栏倒计时）。
 func (o *Orchestrator) IdleSeconds() int {
 	if o.State() != StateRunning {
@@ -213,8 +251,29 @@ func (o *Orchestrator) IdleSeconds() int {
 
 // KeepAlive 手动保持加载：重置空闲计时。
 func (o *Orchestrator) KeepAlive() {
+	o.taskMu.Lock()
 	o.lastDoneNano.Store(time.Now().UnixNano())
+	o.warningAt = time.Time{}
+	o.taskMu.Unlock()
 	o.emit(Event{Kind: "notice", Text: "idle-reset"})
+}
+
+// IdleReleaseSeconds -1 表示未进入倒计时；任务活动与交互都会取消倒计时。
+func (o *Orchestrator) IdleReleaseSeconds() int {
+	o.taskMu.Lock()
+	defer o.taskMu.Unlock()
+	return o.idleReleaseSecondsLocked(time.Now())
+}
+
+func (o *Orchestrator) idleReleaseSecondsLocked(now time.Time) int {
+	if o.warningAt.IsZero() || o.activeTasks != 0 {
+		return -1
+	}
+	remaining := 30*time.Second - now.Sub(o.warningAt)
+	if remaining <= 0 {
+		return 0
+	}
+	return int((remaining + time.Second - 1) / time.Second)
 }
 
 // ---------- EnsureRunning / 停止 ----------
@@ -226,8 +285,17 @@ func (o *Orchestrator) EnsureRunning(modelPath, modelID string) (Endpoint, error
 	if !o.waitWhileStoppingLocked(30 * time.Second) {
 		return Endpoint{}, fmt.Errorf("模型释放超时，请稍后重试")
 	}
-	if o.state == StateRunning && o.modelPath == modelPath {
+	select {
+	case <-o.quit:
+		return Endpoint{}, fmt.Errorf("应用正在退出，无法加载模型")
+	default:
+	}
+	matchingSettings := o.loadedCtxTokens == o.set.CtxTokens() && o.loadedNGLPolicy == o.set.NGLOverride() && o.loadedThreads == o.set.CPUThreads()
+	if o.state == StateRunning && o.modelPath == modelPath && matchingSettings {
 		return o.endpoint, nil
+	}
+	if o.state == StateRunning && o.countTasks() > 1 {
+		return Endpoint{}, fmt.Errorf("其他任务正在使用当前模型，请等待任务结束后再切换模型或推理设置")
 	}
 	if o.state == StateRunning || o.state == StateCrashed {
 		// 热切换（ADR-003）：优雅停止旧进程
@@ -448,7 +516,8 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 	if err != nil {
 		return fmt.Errorf("创建 Job Object 失败: %w", err)
 	}
-	handle, pid, err := spawnProc(exe, args, paths.BaseDir(), llamaLogPath(), job)
+	logPath := inferenceLogPath(o.set)
+	handle, pid, err := spawnProc(exe, args, paths.BaseDir(), logPath, job)
 	if err != nil {
 		winproc.CloseJob(job)
 		return err
@@ -518,6 +587,9 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 	}
 	o.setState(StateRunning, "healthy")
 	o.lastDoneNano.Store(time.Now().UnixNano())
+	o.loadedCtxTokens = o.set.CtxTokens()
+	o.loadedNGLPolicy = o.set.NGLOverride()
+	o.loadedThreads = o.set.CPUThreads()
 
 	go o.crashWatch(exited)
 	go o.healthWatch()
@@ -530,6 +602,14 @@ func (o *Orchestrator) startProcLocked(modelPath, modelID string) error {
 
 func llamaLogPath() string {
 	return filepath.Join(paths.LogsDir(), "llama-server.out.log")
+}
+
+// 关闭日志时仍提供合法的可继承标准输出句柄，避免影响子进程启动。
+func inferenceLogPath(settings Settings) string {
+	if logging, ok := settings.(interface{ LoggingEnabled() bool }); ok && logging.LoggingEnabled() {
+		return llamaLogPath()
+	}
+	return os.DevNull
 }
 
 // crashWatch 运行中意外退出 → 指数退避重启（1s/2s/4s，3 次失败转 crashed）。
@@ -612,33 +692,39 @@ func (o *Orchestrator) idleWatch() {
 			return
 		case <-t.C:
 		}
-		mins := o.set.IdleMinutes()
-		if mins <= 0 {
-			continue // 常驻
-		}
-		if o.State() != StateRunning {
-			continue
-		}
-		idleFor := time.Since(time.Unix(0, o.lastDoneNano.Load()))
-		if idleFor < time.Duration(mins)*time.Minute {
-			continue
-		}
-		// 持 taskMu 复核（02 文档 §6.1 锁序）
-		o.taskMu.Lock()
-		if o.activeTasks != 0 {
-			o.taskMu.Unlock()
-			continue
-		}
-		o.taskMu.Unlock()
-		// 取 opMu 后二次复核：TaskBegin 先计数后取 opMu，期间计数变化则放弃卸载。
-		o.opMu.Lock()
-		if o.state == StateRunning && o.countTasks() == 0 {
-			o.log.Info("idle timeout, unloading model", "idleFor", idleFor.String())
-			o.emit(Event{Kind: "notice", Text: "idle-unload", Extra: map[string]any{"idleForSec": int(idleFor.Seconds())}})
-			_ = o.stopProcLocked("idle-timeout")
-		}
-		o.opMu.Unlock()
+		o.idleTick(time.Now())
 	}
+}
+
+// idleTick 用后端时钟驱动倒计时，窗口隐藏/浏览器计时器节流不会中断任务。
+// opMu → taskMu 下提交停止状态；TaskBegin 从不持 taskMu 等 opMu。
+func (o *Orchestrator) idleTick(now time.Time) {
+	o.opMu.Lock()
+	defer o.opMu.Unlock()
+	o.taskMu.Lock()
+	mins := o.set.IdleMinutes()
+	if o.state != StateRunning || o.activeTasks != 0 || mins <= 0 || now.Sub(time.Unix(0, o.lastDoneNano.Load())) < time.Duration(mins)*time.Minute {
+		o.warningAt = time.Time{}
+		o.taskMu.Unlock()
+		return
+	}
+	if o.warningAt.IsZero() {
+		o.warningAt = now
+	}
+	remaining := o.idleReleaseSecondsLocked(now)
+	if remaining > 0 {
+		o.taskMu.Unlock()
+		o.emit(Event{Kind: "notice", Text: "idle-warning", Extra: map[string]any{"remainingSeconds": remaining}})
+		return
+	}
+	// 此刻没有活跃任务；之后的新任务会等待停止结束，再重新唤醒。
+	o.state = StateStopping
+	o.warningAt = time.Time{}
+	o.taskMu.Unlock()
+	o.log.Info("inactivity countdown elapsed, unloading model")
+	o.emit(Event{Kind: "state", State: string(StateStopping), Reason: "idle-timeout", Model: o.modelID})
+	o.emit(Event{Kind: "notice", Text: "idle-unload"})
+	_ = o.stopProcLocked("idle-timeout")
 }
 
 func (o *Orchestrator) countTasks() int {

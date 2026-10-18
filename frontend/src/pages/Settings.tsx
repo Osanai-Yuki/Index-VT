@@ -5,12 +5,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Plus } from 'lucide-react'
-import { Badge, Button, Field, Modal, Segmented, Slider, Switch, Textarea } from '../components/ui/index'
+import { Badge, Button, Field, Modal, Segmented, Switch, Textarea } from '../components/ui/index'
 import { ModeDetails } from '../components/ModeDetails'
+import { GlossaryManager } from '../components/GlossaryManager'
 import { applyFontSize, applyTheme, type FontSize, type ThemeMode } from '../theme/theme'
 import { BUILTIN_MODES, splitLines, useModeStore, type ModePreset } from '../lib/modes'
 import { toast } from '../stores/toastStore'
-import { apiGetConfig, apiSetConfig, apiCollectLogs, apiClearHistory, apiOpenLogsFolder, apiEstimateCtxVRAM } from '../wailsapi'
+import { apiGetConfig, apiSetConfig, apiCollectLogs, apiClearLogs, apiClearHistory, apiOpenLogsFolder, apiEstimateCtxVRAM } from '../wailsapi'
 
 const numInputCls =
   'bg-sunken border border-line text-ink1 text-center num w-22 py-1.5'
@@ -24,7 +25,7 @@ function Row({ title, desc, children }: { title: string; desc?: string; children
     <div className="flex items-center gap-4 px-5 py-3.5 border-t border-line">
       <div>
         <div className="text-body font-semibold">{title}</div>
-        {desc && <div className="text-micro text-ink3 mt-0.5">{desc}</div>}
+        {desc && <div className="text-caption text-ink2 mt-0.5">{desc}</div>}
       </div>
       <div className="ml-auto flex items-center gap-2.5">{children}</div>
     </div>
@@ -36,6 +37,7 @@ export function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [savedTimer, setSavedTimer] = useState<number | null>(null)
   const [logsPath, setLogsPath] = useState('')
+  const [clearingLogs, setClearingLogs] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   // 自定义翻译模式编辑器（null = 关闭；id null = 新建）
   const [modeEditor, setModeEditor] = useState<{
@@ -73,7 +75,10 @@ export function SettingsPage() {
         const t = window.setTimeout(() => setSaved(false), 1500)
         setSavedTimer(t)
       })
-      .catch((e) => toast.push({ tone: 'error', message: String((e as { message?: string })?.message ?? e) }))
+      .catch((e) => {
+        apiGetConfig().then(setCfg).catch(() => {})
+        toast.push({ tone: 'error', message: String((e as { message?: string })?.message ?? e) })
+      })
   }
 
   // ── ctx 自定义档（C3）────────────────────────────────────────
@@ -297,18 +302,11 @@ export function SettingsPage() {
             资源 · <b className="text-ink2 font-medium">RESOURCES</b>
           </span>
         </div>
-        <Row title="空闲自动释放" desc="无任务持续超时后卸载模型，释放显存；0 = 常驻">
-          <Slider
-            value={Math.max(0, Math.min(30, cfg.resource.idleUnloadMinutes ?? 5))}
-            onChange={(v) => {
-              setCfg({ ...cfg, resource: { ...cfg.resource, idleUnloadMinutes: v } })
-              save({ resource: { ...cfg.resource, idleUnloadMinutes: v } })
-            }}
-            min={0}
-            max={30}
-            label="空闲自动释放分钟数"
-            formatValue={(v) => (v === 0 ? '常驻' : `${v} 分钟`)}
-          />
+        <Row title="无操作后释放" desc="连续 30 分钟无鼠标、滚动或键盘操作，且没有翻译任务时，提示倒计时 30 秒；任何操作都会取消倒计时">
+          <span className="text-body text-ink2 whitespace-nowrap">30 分钟 + 30 秒</span>
+        </Row>
+        <Row title="启动时加载" desc="打开程序后加载默认模型及已保存的上下文设置；首次默认 Translate / 8K">
+          <span className="text-body text-ink2 whitespace-nowrap">自动加载</span>
         </Row>
         <Row title="关闭程序时" desc="退出即释放全部资源（推荐）">
           <Segmented<string>
@@ -344,6 +342,7 @@ export function SettingsPage() {
         </Row>
       </div>
 
+      <GlossaryManager />
       {/* 翻译模式（领域约束模板） */}
       <div className="bg-surface border border-line pb-1.5">
         <div className="px-5 pt-4 pb-2">
@@ -428,7 +427,10 @@ export function SettingsPage() {
             立即清空
           </Button>
         </Row>
-        <Row title="日志" desc="logs\indexvt-YYYYMMDD.log · 滚动保留 7 天">
+        <Row title="记录日志" desc="默认关闭，修改后重启应用生效；开启时记录应用和推理引擎日志，运行日志保留 7 天">
+          <Switch label="记录日志" srOnly checked={!!cfg.loggingEnabled} onChange={loggingEnabled => save({ loggingEnabled })} />
+        </Row>
+        <Row title="日志管理" desc="清理已有日志和诊断包；正在使用的文件会跳过，不影响模型和翻译历史">
           <Button onClick={() => apiOpenLogsFolder().catch(() => {})}>打开日志目录</Button>
           <Button
             kind="primary"
@@ -442,6 +444,24 @@ export function SettingsPage() {
             }
           >
             一键收集打包
+          </Button>
+          <Button
+            disabled={clearingLogs}
+            onClick={async () => {
+              if (clearingLogs) return
+              setClearingLogs(true)
+              try {
+                const result = await apiClearLogs()
+                setLogsPath('')
+                toast.push({ tone: result.skipped.length ? 'warn' : 'ok', message: `已清理 ${result.removed} 个日志或诊断包${result.skipped.length ? `；${result.skipped.length} 个文件未能删除，请关闭占用后重试：${result.skipped.join('、')}` : ''}` })
+              } catch (e) {
+                toast.push({ tone: 'error', message: String((e as { message?: string })?.message ?? e) })
+              } finally {
+                setClearingLogs(false)
+              }
+            }}
+          >
+            {clearingLogs ? '正在清理…' : '清理日志'}
           </Button>
         </Row>
         {logsPath && (
@@ -463,10 +483,10 @@ export function SettingsPage() {
             关于 · <b className="text-ink2 font-medium">ABOUT</b>
           </span>
         </div>
-        <div className="px-5 pt-1 text-caption text-ink3 leading-loose">
-          Index-VT v{cfg.version ?? '1.0.0'} · Wails v2 / Go / React 18 · 模型权重 Apache-2.0 © Bilibili IndexTeam · llama.cpp MIT
-          <br />
-          本软件与 bilibili / IndexTeam 无官方关联；模型输出由 Apache-2.0 开源权重本地推理产生。
+        <div className="px-5 pt-1 text-body font-medium text-ink2 leading-relaxed space-y-1 select-text">
+          <p>Index-VT v{cfg.version ?? '1.0.0'} · Wails v2 / Go / React 18</p>
+          <p>模型权重 Apache-2.0 © Bilibili IndexTeam · llama.cpp MIT</p>
+          <p>本软件与 bilibili / IndexTeam 无官方关联；模型输出由 Apache-2.0 开源权重本地推理产生。</p>
         </div>
       </div>
       {saved && (

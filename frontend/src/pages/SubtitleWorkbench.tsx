@@ -13,6 +13,11 @@ import { useAppStore } from '../stores/appStore'
 import { on, EV } from '../lib/wails'
 import {
   apiSubOpen,
+  apiNoteWorkspace,
+  apiSubUndo,
+  apiSubShiftCue,
+  apiRevealFile,
+  apiListGlossaries,
   apiSubTranslate,
   apiSubPauseQueue,
   apiSubResumeQueue,
@@ -46,12 +51,16 @@ interface Cue {
 }
 
 interface Doc {
+  revision?: number
   id: string
   path: string
   format: string
   encoding: string
   cues: Cue[]
   /** 是否有进行中的翻译队列（SubGetDoc 权威快照，GetDoc 时按 queueCancel 计算） */
+  canUndo?: boolean
+  canRedo?: boolean
+  queuePaused?: boolean
   queueActive?: boolean
 }
 
@@ -108,36 +117,122 @@ interface EditState {
   styleModal: { mode: 'new' | 'edit'; style: StyleDef } | null
 }
 
-export function SubtitleWorkbench({ langs }: { langs: any[] }) {
+// A new scope is allocated on every successful import (even if an ID is reused).
+// Request versions reject older snapshots of the same document as well.
+interface DocScope {
+  revision: number
+  id: string
+  snapshotVersion: number
+  stylesVersion: number
+  mutations?: Promise<void>
+}
+
+interface CueProgress {
+  revision?: number
+  docId: string
+  cueIndex: number
+  state?: string
+  offTarget?: boolean
+  needsCheck?: boolean
+  translated?: string
+}
+
+const initialEditState = (): EditState => ({
+  editingCell: null,
+  editValue: '',
+  contextMenu: null,
+  shiftModal: false,
+  calibrateMode: 0,
+  calibrateAnchor1: null,
+  calibrateModal: null,
+  stylePanelTab: 'detail',
+  styleModal: null,
+})
+
+export function SubtitleWorkbench({ langs, active = true }: { langs: any[]; active?: boolean }) {
   const [doc, setDoc] = useState<Doc | null>(null)
   const [targetLang, setTargetLang] = useState('en')
   const [bilingual, setBilingual] = useState('双语双行')
   const [exportFmt, setExportFmt] = useState('SRT')
+  const [glossaries, setGlossaries] = useState<{ id: number; name: string; items?: unknown[] }[]>([])
+  const [glossaryId, setGlossaryId] = useState(0)
+  const [confirmFull, setConfirmFull] = useState(false)
+  const [confirmExport, setConfirmExport] = useState(false)
+  const [exportEncoding, setExportEncoding] = useState('utf-8')
+  const [canceling, setCanceling] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuReturnRef = useRef<HTMLElement | null>(null)
+  const [tableRowHeight, setTableRowHeight] = useState(64)
   const [queueMsg, setQueueMsg] = useState<string | null>(null)
   const [selIdx, setSelIdx] = useState<number | null>(null)
   const [styles, setStyles] = useState<StyleDef[]>([])
-  const [edit, setEdit] = useState<EditState>({
-    editingCell: null,
-    editValue: '',
-    contextMenu: null,
-    shiftModal: false,
-    calibrateMode: 0,
-    calibrateAnchor1: null,
-    calibrateModal: null,
-    stylePanelTab: 'detail',
-    styleModal: null,
-  })
+  const [edit, setEdit] = useState<EditState>(initialEditState)
+  useEffect(() => { apiNoteWorkspace('subtitle', !!doc && (!!edit.editingCell || !!doc.canUndo || doc.cues.some(c => !!c.translated))).catch(() => {}) }, [!!doc && (!!edit.editingCell || !!doc.canUndo || doc.cues.some(c => !!c.translated))])
+  const scopeRef = useRef<DocScope | null>(null)
+  useEffect(() => { useAppStore.setState(s => ({ pageTasks: { ...s.pageTasks, subtitle: !!doc?.queueActive } })) }, [doc?.queueActive])
+  const importVersion = useRef(0)
+  const mounted = useRef(false)
   const reconcileTimer = useRef<number | null>(null)
+  const cancelTimer = useRef<number | null>(null)
   const shiftInputRef = useRef<HTMLInputElement>(null)
   const calibrateInputRef = useRef<HTMLInputElement>(null)
 
   const refreshStatus = useAppStore((s) => s.refreshStatus)
 
+  const clearTimers = useCallback(() => {
+    if (reconcileTimer.current !== null) window.clearTimeout(reconcileTimer.current)
+    if (cancelTimer.current !== null) window.clearTimeout(cancelTimer.current)
+    reconcileTimer.current = null
+    cancelTimer.current = null
+  }, [])
+
+  const requestDoc = useCallback(async (
+    scope: DocScope,
+    request: (id: string) => Promise<Doc | null>,
+    reportError = false,
+  ): Promise<'applied' | 'stale' | 'failed'> => {
+    if (scopeRef.current !== scope) return 'stale'
+    const version = ++scope.snapshotVersion
+    try {
+      const fresh = await request(scope.id)
+      if (scopeRef.current !== scope || version !== scope.snapshotVersion || fresh?.id !== scope.id) return 'stale'
+      if (fresh.revision !== undefined && fresh.revision < scope.revision) return 'stale'
+      scope.revision = fresh.revision ?? scope.revision
+      setDoc(fresh)
+      return 'applied'
+    } catch (e) {
+      if (reportError && scopeRef.current === scope && version === scope.snapshotVersion) errToast(e)
+      return 'failed'
+    }
+  }, [])
+
+  const refreshDoc = useCallback(async (scope: DocScope) => {
+    await requestDoc(scope, apiSubGetDoc)
+  }, [requestDoc])
+
+  const refreshStyles = useCallback(async (scope: DocScope) => {
+    if (scopeRef.current !== scope) return
+    const version = ++scope.stylesVersion
+    try {
+      const fresh: StyleDef[] = await apiSubStyles(scope.id)
+      if (scopeRef.current === scope && version === scope.stylesVersion) setStyles(fresh ?? [])
+    } catch { /* keep the current styles if refreshing fails */ }
+  }, [])
+
   useEffect(() => {
+    mounted.current = true
     const off = on(EV.CUE, (p) => {
-      const cue = p as { cueIndex?: number; state?: string; offTarget?: boolean; needsCheck?: boolean; translated?: string }
+      const cue = p as CueProgress | null
+      const scope = scopeRef.current
+      if (!scope || cue?.docId !== scope.id || !Number.isInteger(cue.cueIndex)) return
+      if (cue.revision !== undefined) {
+        if (!Number.isSafeInteger(cue.revision) || cue.revision <= scope.revision) return
+        scope.revision = cue.revision
+      }
+      // A snapshot taken before this event must not undo its newer cue data.
+      ++scope.snapshotVersion
       setDoc((d) => {
-        if (!d) return d
+        if (!d || scopeRef.current !== scope || d.id !== cue.docId) return d
         const cues = d.cues.map((c) =>
           c.index === cue.cueIndex
             ? {
@@ -149,161 +244,182 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
               }
             : c,
         )
-        return { ...d, cues }
+        return { ...d, revision: cue.revision ?? d.revision, cues }
       })
       if (cue.state === 'done' || cue.state === 'failed' || cue.state === 'skipped') {
         if (reconcileTimer.current !== null) window.clearTimeout(reconcileTimer.current)
         reconcileTimer.current = window.setTimeout(() => {
-          setDoc((cur) => {
-            if (cur) apiSubGetDoc(cur.id).then((fresh) => fresh && setDoc(fresh)).catch(() => {})
-            return cur
-          })
+          reconcileTimer.current = null
+          void refreshDoc(scope)
         }, 1000)
       }
     })
     return () => {
       off()
-      if (reconcileTimer.current !== null) window.clearTimeout(reconcileTimer.current)
+      mounted.current = false
+      ++importVersion.current
+      scopeRef.current = null
+      clearTimers()
     }
-  }, [])
+  }, [clearTimers, refreshDoc])
 
   // M4：Esc 关闭右键菜单
   useEffect(() => {
-    if (!edit.contextMenu) return
+    if (!active || !edit.contextMenu) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setEdit((ed) => ({ ...ed, contextMenu: null }))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [edit.contextMenu])
+  }, [active, edit.contextMenu])
 
   const doImport = useCallback(async () => {
+    const version = ++importVersion.current
     try {
-      const d = await apiSubOpen()
-      if (d) {
+      const d: Doc | null = await apiSubOpen()
+      if (mounted.current && version === importVersion.current && d?.id) {
+        clearTimers()
+        const scope = { id: d.id, revision: d.revision ?? 0, snapshotVersion: 0, stylesVersion: 0 }
+        scopeRef.current = scope
         setDoc(d)
+        setConfirmFull(false)
+        setConfirmExport(false)
         setSelIdx(null)
         setQueueMsg(null)
-        // 加载样式库
-        apiSubStyles(d.id).then(setStyles).catch(() => {})
+        setEdit(initialEditState())
+        setStyles([])
+        void refreshStyles(scope)
       }
     } catch (e) {
-      errToast(e)
+      if (mounted.current && version === importVersion.current) errToast(e)
     }
+  }, [clearTimers, refreshStyles])
+
+  useEffect(() => { if (active) apiListGlossaries().then(gs => setGlossaries(gs ?? [])).catch(errToast) }, [active])
+  const queueOpt = { targetLang, glossaryId, bilingual: bilingual === '仅译文' ? 'translation-only' : bilingual === '双语双行' ? 'dual-line' : 'keep-original' }
+
+  const runQueueAction = async (request: (id: string) => Promise<unknown>, queueError = false, cancel = false) => {
+    const scope = scopeRef.current
+    if (!scope) return
+    ++scope.snapshotVersion
+    try {
+      await request(scope.id)
+      if (scopeRef.current !== scope) return
+      await refreshDoc(scope)
+      if (scopeRef.current !== scope) return
+      if (cancel) {
+        if (cancelTimer.current !== null) window.clearTimeout(cancelTimer.current)
+        cancelTimer.current = window.setTimeout(() => {
+          cancelTimer.current = null
+          void refreshDoc(scope)
+        }, 500)
+      }
+      await refreshStatus()
+    } catch (e) {
+      if (scopeRef.current !== scope) return
+      if (cancel) setCanceling(false)
+      if (queueError) setQueueMsg(String((e as { message?: string })?.message ?? e))
+      else errToast(e)
+    }
+  }
+
+  useEffect(() => { if (!doc?.queueActive) setCanceling(false) }, [doc?.queueActive])
+
+  const startFull = () => runQueueAction(id => apiSubTranslate(id, { ...queueOpt, full: true }))
+
+  // 同一文档的编辑按发出顺序提交，旧文档的排队编辑不会写入新文档。
+  const mutateDoc = async (request: (id: string) => Promise<Doc | null>, after?: (scope: DocScope) => void) => {
+    const scope = scopeRef.current
+    if (!scope) return false
+    const work = (scope.mutations ?? Promise.resolve()).then(async () => {
+      if (scopeRef.current !== scope) return false
+      const result = await requestDoc(scope, request, true)
+      if (scopeRef.current !== scope) return
+      if (result === 'applied') after?.(scope)
+      else if (result === 'stale') await refreshDoc(scope)
+      return result === 'applied'
+    })
+    scope.mutations = work.then(() => {}, error => { errToast(error) })
+    return await work
+  }
+
+  const doExport = async () => {
+    if (!doc) return
+    setConfirmExport(false)
+    try {
+      const saved = await apiSubExport(doc.id, { format: exportFmt.toLowerCase(), encoding: exportEncoding, bilingual: queueOpt.bilingual })
+      if (saved) toast.push({ tone: 'ok', message: `已导出：${saved}`, action: { label: '打开所在文件夹', run: () => { apiRevealFile(saved).catch(errToast) } } })
+    } catch (e) { errToast(e) }
+  }
+
+  useEffect(() => {
+    const update = () => {
+      const size = parseFloat(getComputedStyle(document.body).fontSize)
+      setTableRowHeight(Math.max(64, Math.ceil(size * 4.75)))
+    }
+    update()
+    const observer = new MutationObserver(update)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-font-size'] })
+    return () => observer.disconnect()
   }, [])
 
-  const queueOpt = { targetLang, bilingual: bilingual === '仅译文' ? 'translation-only' : bilingual === '双语双行' ? 'dual-line' : 'keep-original' }
+  useEffect(() => {
+    if (!active || !doc?.queueActive) return
+    const scope = scopeRef.current
+    const timer = setInterval(() => { if (scope) void refreshDoc(scope) }, 1000)
+    return () => clearInterval(timer)
+  }, [active, doc?.queueActive, refreshDoc])
 
-  const refreshDoc = () =>
-    setDoc((cur) => {
-      if (cur) apiSubGetDoc(cur.id).then((d) => d && setDoc(d)).catch(() => {})
-      return cur
-    })
+  useEffect(() => {
+    if (!active || !edit.contextMenu || !menuRef.current) return
+    const grid = document.querySelector<HTMLElement>('[aria-label="字幕条目列表"]')
+    menuReturnRef.current = grid?.contains(document.activeElement) ? document.activeElement as HTMLElement : grid
+    const menu = menuRef.current
+    const rect = menu.getBoundingClientRect()
+    menu.style.left = `${Math.max(8, Math.min(edit.contextMenu.x, window.innerWidth - rect.width - 8))}px`
+    menu.style.top = `${Math.max(8, Math.min(edit.contextMenu.y, window.innerHeight - rect.height - 8))}px`
+    menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    return () => { menuReturnRef.current?.focus() }
+  }, [active, edit.contextMenu])
 
-  const startFull = () =>
-    apiSubTranslate(doc!.id, { ...queueOpt, full: true })
-      .then(refreshDoc)
-      .then(refreshStatus)
-      .catch(errToast)
+  const doUpdateCue = (index: number, patch: Partial<Cue>) =>
+    mutateDoc(id => apiSubUpdateCue(id, index, patch))
 
-  // M4 编辑操作
-  const doUpdateCue = async (index: number, patch: Partial<Cue>) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubUpdateCue(doc.id, index, patch)
-      if (fresh) setDoc(fresh)
-    } catch (e) {
-      errToast(e)
+  const doSplitCue = (index: number, atMs: number) =>
+    mutateDoc(id => apiSubSplitCue(id, index, atMs))
+
+  const doMergeCues = (fromIndex: number, toIndex: number) =>
+    mutateDoc(id => apiSubMergeCues(id, fromIndex, toIndex))
+
+  const doShiftAll = (deltaMs: number) => mutateDoc(id => apiSubShiftAll(id, deltaMs))
+
+  const doCalibrate = (anchor1Idx: number, anchor1Ms: number, anchor2Idx: number, anchor2Ms: number) =>
+    mutateDoc(id => apiSubCalibrate(id, anchor1Idx, anchor2Idx, anchor1Ms, anchor2Ms))
+
+  const doDeleteCues = (indices: number[]) =>
+    mutateDoc(id => apiSubDeleteCues(id, indices), () => setSelIdx(null))
+
+  const doInsertCue = (afterIndex: number) => mutateDoc(id => apiSubInsertCue(id, afterIndex))
+
+  const doSetStyle = (style: StyleDef) =>
+    mutateDoc(id => apiSubSetStyle(id, style), scope => { void refreshStyles(scope) })
+
+  const doAssignStyle = (indices: number[], styleName: string) =>
+    mutateDoc(id => apiSubAssignStyle(id, indices, styleName))
+
+  useEffect(() => {
+    if (!active || !doc || doc.queueActive) return
+    const handle = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.isComposing || (e.target as HTMLElement)?.closest('input,textarea,[contenteditable=true]')) return
+      const redo = e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z')
+      if (!redo && e.key.toLowerCase() !== 'z') return
+      if (redo ? !doc.canRedo : !doc.canUndo) return
+      e.preventDefault()
+      void mutateDoc(id => apiSubUndo(id, redo), scope => { setSelIdx(null); setEdit(initialEditState()); void refreshStyles(scope) })
     }
-  }
-
-  const doSplitCue = async (index: number, atMs: number) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubSplitCue(doc.id, index, atMs)
-      if (fresh) setDoc(fresh)
-    } catch (e) {
-      errToast(e)
-    }
-  }
-
-  const doMergeCues = async (fromIndex: number, toIndex: number) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubMergeCues(doc.id, fromIndex, toIndex)
-      if (fresh) setDoc(fresh)
-    } catch (e) {
-      errToast(e)
-    }
-  }
-
-  const doShiftAll = async (deltaMs: number) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubShiftAll(doc.id, deltaMs)
-      if (fresh) setDoc(fresh)
-    } catch (e) {
-      errToast(e)
-    }
-  }
-
-  const doCalibrate = async (anchor1Idx: number, anchor1Ms: number, anchor2Idx: number, anchor2Ms: number) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubCalibrate(doc.id, anchor1Idx, anchor2Idx, anchor1Ms, anchor2Ms)
-      if (fresh) setDoc(fresh)
-    } catch (e) {
-      errToast(e)
-    }
-  }
-
-  const doDeleteCues = async (indices: number[]) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubDeleteCues(doc.id, indices)
-      if (fresh) {
-        setDoc(fresh)
-        // 删除后条目重排：旧 selIdx 可能指向已删条目（删最后一条时 find 落空
-        // → 详情面板非空断言崩溃白屏），或悄悄指向另一条，统一清掉重选。
-        setSelIdx(null)
-      }
-    } catch (e) {
-      errToast(e)
-    }
-  }
-
-  const doInsertCue = async (afterIndex: number) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubInsertCue(doc.id, afterIndex)
-      if (fresh) setDoc(fresh)
-    } catch (e) {
-      errToast(e)
-    }
-  }
-
-  const doSetStyle = async (style: StyleDef) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubSetStyle(doc.id, style)
-      if (fresh) {
-        setDoc(fresh)
-        apiSubStyles(doc.id).then(setStyles).catch(() => {})
-      }
-    } catch (e) {
-      errToast(e)
-    }
-  }
-
-  const doAssignStyle = async (indices: number[], styleName: string) => {
-    if (!doc) return
-    try {
-      const fresh = await apiSubAssignStyle(doc.id, indices, styleName)
-      if (fresh) setDoc(fresh)
-    } catch (e) {
-      errToast(e)
-    }
-  }
+    window.addEventListener('keydown', handle)
+    return () => window.removeEventListener('keydown', handle)
+  }, [active, doc?.canUndo, doc?.canRedo, doc?.queueActive])
 
   const doneCount = doc ? doc.cues.filter((c) => c.state === 'done' || c.state === 'skipped').length : 0
   const failedCount = doc ? doc.cues.filter((c) => c.state === 'failed').length : 0
@@ -330,12 +446,12 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
     {
       key: 'original',
       header: '原文',
-      render: (c) => <span className="text-caption text-ink2 line-clamp-2">{c.original}</span>,
+      render: (c) => <span className="select-text cursor-text text-body text-ink2 line-clamp-2">{c.original}</span>,
     },
     {
       key: 'translated',
       header: '译文',
-      render: (c) => <span className="text-caption text-ink1 line-clamp-2">{c.translated}</span>,
+      render: (c) => <span className="select-text cursor-text text-body text-ink1 line-clamp-2">{c.translated}</span>,
     },
     {
       key: 'state',
@@ -360,35 +476,27 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
         </Button>
         {doc && (
           <Badge tone="accent" dot>
-            {doc.path.split(/[\\/]/).pop()} · <span className="num">{doc.cues.length}</span> cues · {doc.format.toUpperCase()}
+            {doc.path.split(/[\\/]/).pop()} · <span className="num">{doc.cues.length}</span> cues · {doc.format.toUpperCase()} · {doc.encoding}
           </Badge>
         )}
-        <Button kind="primary" disabled={!doc} onClick={startFull} title="用当前目标语言与双语模式重翻全部条目（含已翻过的）">
+        <Button kind="primary" disabled={!doc || doc.queueActive} onClick={() => setConfirmFull(true)} title="用当前目标语言与双语模式重翻全部条目（含已翻过的）">
           <Play size={14} /> 全部翻译
         </Button>
-        <Button disabled={!doc || !doc.queueActive} onClick={() => apiSubPauseQueue(doc!.id).then(refreshDoc).catch(errToast)}>
+        <Button disabled={!doc?.queueActive || !!doc.queuePaused || canceling} title="当前条完成后暂停；编辑前请取消队列" onClick={() => runQueueAction(apiSubPauseQueue)}>
           暂停
         </Button>
-        <Button disabled={!doc || !doc.queueActive} onClick={() => apiSubResumeQueue(doc!.id).then(refreshDoc).catch(errToast)}>
+        <Button disabled={!doc?.queueActive || !doc.queuePaused || canceling} onClick={() => runQueueAction(apiSubResumeQueue)}>
           继续
         </Button>
         <Button
-          disabled={!doc || !doc.queueActive}
-          onClick={() => {
-            apiSubCancelQueue(doc!.id)
-            refreshDoc()
-            window.setTimeout(refreshDoc, 500)
-          }}
+          disabled={!doc?.queueActive || canceling}
+          onClick={() => { setCanceling(true); void runQueueAction(apiSubCancelQueue, false, true) }}
         >
-          取消
+          {canceling ? '正在停止…' : '取消'}
         </Button>
         <Button
-          disabled={!doc || failedCount === 0}
-          onClick={() =>
-            apiSubRetryFailed(doc!.id, queueOpt)
-              .then(refreshDoc)
-              .catch((e) => setQueueMsg(String((e as { message?: string })?.message ?? e)))
-          }
+          disabled={!doc || failedCount === 0 || doc.queueActive}
+          onClick={() => runQueueAction(id => apiSubRetryFailed(id, queueOpt), true)}
         >
           重试失败{failedCount > 0 ? `（${failedCount}）` : ''}
         </Button>
@@ -397,9 +505,11 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           value={bilingual}
           aria-label="双语模式"
           onChange={setBilingual}
+          disabled={!!doc?.queueActive}
         />
         <select
           value={targetLang}
+          disabled={!!doc?.queueActive}
           onChange={(e) => setTargetLang(e.target.value)}
           aria-label="目标语言"
           className="bg-sunken border border-line text-ink1 px-2.5 py-1.5 text-caption"
@@ -417,6 +527,10 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
             <span className="num">{doneCount} / {doc.cues.length}</span>
           </Badge>
         )}
+        <select aria-label="字幕术语本" title="提示约束，不能保证每次出现都一致" className="bg-sunken border border-line p-2 text-caption" disabled={!!doc?.queueActive} value={glossaryId} onChange={e => setGlossaryId(Number(e.target.value))}>
+          <option value={0}>不用术语本</option>
+          {glossaries.map(g => <option key={g.id} value={g.id}>{g.name}（{g.items?.length ?? 0}条）</option>)}
+        </select>
         {queueMsg && <Badge tone="danger" dot>{queueMsg}</Badge>}
         <div className="ml-auto flex gap-2.5">
           <Segmented<string>
@@ -427,24 +541,21 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           />
           <Button
             kind="primary"
-            disabled={!doc}
-            onClick={() =>
-              apiSubExport(doc!.id, {
-                format: exportFmt.toLowerCase(),
-                encoding: 'utf-8',
-                bilingual: bilingual === '仅译文' ? 'translation-only' : bilingual === '双语双行' ? 'dual-line' : 'keep-original',
-              }).catch(errToast)
-            }
+            disabled={!doc || doc.queueActive || doc.cues.length === 0}
+            onClick={() => setConfirmExport(true)}
           >
             导出 / 转换
           </Button>
         </div>
       </div>
 
+      {doc && <p className="text-caption text-ink2">暂停在当前条结束后生效；编辑前请取消队列。撤销最多20步，开始翻译将清空历史。重试使用当前语言与术语，已完成行保持不变。会话在切页后保留，关闭前请导出。</p>}
       {/* M4 编辑工具栏 */}
       {doc && (
         <div className="flex items-center gap-2.5 flex-wrap bg-surface border border-line px-3 py-2">
           <span className="text-micro uppercase tracking-caps text-ink3">编辑工具</span>
+          <Button disabled={!doc.canUndo || doc.queueActive} onClick={() => mutateDoc(id => apiSubUndo(id), scope => { setSelIdx(null); setEdit(initialEditState()); void refreshStyles(scope) })}>撤销</Button>
+          <Button disabled={!doc.canRedo || doc.queueActive} onClick={() => mutateDoc(id => apiSubUndo(id, true), scope => { setSelIdx(null); setEdit(initialEditState()); void refreshStyles(scope) })}>重做</Button>
           <Button
             disabled={!doc || doc.queueActive}
             onClick={() => setEdit((e) => ({ ...e, shiftModal: true }))}
@@ -507,7 +618,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                 columns={columns}
                 rows={doc.cues}
                 rowKey={(c) => c.index}
-                rowHeight={56}
+                rowHeight={tableRowHeight}
                 virtual
                 selectedRowKey={selIdx ?? undefined}
                 onRowClick={(c) => {
@@ -534,7 +645,8 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           </div>
 
           {/* 右侧：详情 / 样式面板 */}
-          <div className="bg-surface border border-line p-4 overflow-auto min-h-0">
+          <fieldset disabled={!!doc.queueActive} className="bg-surface border border-line p-4 overflow-auto min-h-0 min-w-0">
+            <legend className="sr-only">字幕详情与样式编辑</legend>
             {edit.stylePanelTab === 'style' ? (
               /* M4: 样式库面板 */
               <div className="flex flex-col gap-3">
@@ -648,23 +760,15 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                     editValue: field === 'original' ? c.original : c.translated,
                   }))
                 }
-                const commitEdit = () => {
-                  if (edit.editingCell) {
-                    doUpdateCue(c.index, edit.editingCell.field === 'original'
-                      ? { original: edit.editValue }
-                      : { translated: edit.editValue })
-                  }
-                  setEdit((e) => ({ ...e, editingCell: null, editValue: '' }))
+                const commitEdit = async () => {
+                  if (!edit.editingCell) return
+                  const value = edit.editValue
+                  const field = edit.editingCell.field
+                  const success = await doUpdateCue(c.index, field === 'original' ? { original: value } : { translated: value })
+                  if (success) setEdit(e => e.editValue === value && e.editingCell?.index === c.index ? { ...e, editingCell: null, editValue: '' } : e)
                 }
                 const shiftTime = (field: 'startMs' | 'endMs', delta: number) => {
-                  // 钳制到合法区间：时间不得为负、止必须大于起。
-                  // 否则 ±100ms 连点会造出负时间 / 起止倒挂的条目，
-                  // 时间码渲染垃圾、导出非法字幕（后端 SubUpdateCue 亦有校验兜底）。
-                  if (field === 'startMs') {
-                    doUpdateCue(c.index, { startMs: Math.max(0, Math.min(c.startMs + delta, c.endMs - 1)) })
-                  } else {
-                    doUpdateCue(c.index, { endMs: Math.max(c.startMs + 1, c.endMs + delta) })
-                  }
+                  void mutateDoc(id => apiSubShiftCue(id, c.index, field, delta))
                 }
                 const isLast = c.index >= doc.cues.length
                 const editingArea = (
@@ -673,7 +777,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                     value={edit.editValue}
                     onChange={(e) => setEdit((ed) => ({ ...ed, editValue: e.target.value }))}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                         e.preventDefault()
                         commitEdit()
                       }
@@ -702,14 +806,14 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                       <Button size="sm" onClick={() => shiftTime('endMs', 100)} title="+100ms">+100</Button>
                     </div>
                     {/* 原文（行内编辑） */}
-                    <div className="bg-sunken p-3 text-body text-ink2 leading-relaxed">
+                    <div className="select-text cursor-text bg-sunken p-3 text-body text-ink2 leading-relaxed">
                       {editing === 'original' ? editingArea : c.original}
                       <div className="mt-1.5">
                         <Button size="sm" onClick={() => startEdit('original')}>编辑原文</Button>
                       </div>
                     </div>
                     {/* 译文（行内编辑） */}
-                    <div className="bg-sunken p-3 text-body text-ok leading-relaxed min-h-11">
+                    <div className="select-text cursor-text bg-sunken p-3 text-body text-ok leading-relaxed min-h-11">
                       {editing === 'translated'
                         ? editingArea
                         : (c.translated || <span className="text-ink3">（未翻译）</span>)}
@@ -738,12 +842,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                         <Button
                           kind="primary"
                           size="sm"
-                          onClick={() =>
-                            apiSubRetryCues(doc!.id, [c.index], queueOpt)
-                              .then(refreshDoc)
-                              .then(refreshStatus)
-                              .catch(errToast)
-                          }
+                          onClick={() => runQueueAction(id => apiSubRetryCues(id, [c.index], queueOpt))}
                         >
                           <RotateCcw size={14} /> 重试本条
                         </Button>
@@ -758,13 +857,13 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
                 )
               })()
             )}
-          </div>
+          </fieldset>
         </div>
       )}
 
       {/* M4: 平移 Modal */}
       <Modal
-        open={edit.shiftModal}
+        open={active && edit.shiftModal}
         onClose={() => setEdit((ed) => ({ ...ed, shiftModal: false }))}
         title="整体平移"
         initialFocus="first"
@@ -798,7 +897,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           className="bg-sunken border border-line text-ink1 px-3 py-2 text-body w-full"
           placeholder="例如：1.5 或 -0.5"
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               const sec = parseFloat((e.target as HTMLInputElement).value)
               if (!isNaN(sec)) {
                 doShiftAll(Math.round(sec * 1000))
@@ -811,7 +910,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
 
       {/* M4: 样式编辑 Modal */}
       <Modal
-        open={!!edit.styleModal}
+        open={active && !!edit.styleModal}
         onClose={() => setEdit((ed) => ({ ...ed, styleModal: null }))}
         title={edit.styleModal?.mode === 'new' ? '新建样式' : '编辑样式'}
         initialFocus="first"
@@ -972,7 +1071,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
 
       {/* M4: 校准第二锚点输入 Modal */}
       <Modal
-        open={!!edit.calibrateModal}
+        open={active && !!edit.calibrateModal}
         onClose={() => setEdit((ed) => ({ ...ed, calibrateModal: null }))}
         title="校准 · 输入正确时间"
         initialFocus="first"
@@ -1009,7 +1108,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           aria-label="第 2 条参照的正确时间（毫秒）"
           className="bg-sunken border border-line text-ink1 px-3 py-2 text-body w-full"
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               const raw = (e.target as HTMLInputElement).value.trim()
               const ms = Number(raw)
               if (edit.calibrateModal && edit.calibrateAnchor1 && raw !== '' && Number.isFinite(ms) && ms >= 0) {
@@ -1022,7 +1121,7 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
       </Modal>
 
       {/* M4: 右键菜单（拆分/合并/插入/删除/重译） */}
-      {edit.contextMenu && (
+      {active && edit.contextMenu && (
         <>
           {/* 事件捕获层：点击外部关闭 */}
           <div
@@ -1038,6 +1137,17 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           <div
             className="fixed z-50 bg-surface border border-line rounded-sm shadow-lg py-1 min-w-32"
             style={{ left: edit.contextMenu.x, top: edit.contextMenu.y }}
+            ref={menuRef}
+            onKeyDown={e => {
+              const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+              const at = items.indexOf(document.activeElement as HTMLButtonElement)
+              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault()
+                const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+                items[next]?.focus()
+              }
+              if (e.key === 'Escape' || e.key === 'Tab') setEdit(ed => ({ ...ed, contextMenu: null }))
+            }}
             role="menu"
             aria-label="字幕条目操作"
           >
@@ -1062,16 +1172,13 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
               )
               return (
                 <>
-                  {item('拆分（中点）', () => doSplitCue(c.index, Math.floor((c.startMs + c.endMs) / 2)))}
-                  {item('合并（与下一条）', () => doMergeCues(c.index, c.index + 1), isLast)}
-                  {item('插入（本条后）', () => doInsertCue(c.index))}
-                  {item('删除', () => doDeleteCues([c.index]))}
+                  {item('拆分（中点）', () => doSplitCue(c.index, Math.floor((c.startMs + c.endMs) / 2)), !!doc?.queueActive)}
+                  {item('合并（与下一条）', () => doMergeCues(c.index, c.index + 1), isLast || !!doc?.queueActive)}
+                  {item('插入（本条后）', () => doInsertCue(c.index), !!doc?.queueActive)}
+                  {item('删除', () => doDeleteCues([c.index]), !!doc?.queueActive)}
                   {c.state === 'failed' &&
                     item('重译本条', () => {
-                      apiSubRetryCues(doc!.id, [c.index], queueOpt)
-                        .then(refreshDoc)
-                        .then(refreshStatus)
-                        .catch(errToast)
+                      void runQueueAction(id => apiSubRetryCues(id, [c.index], queueOpt))
                     })}
                 </>
               )
@@ -1079,6 +1186,16 @@ export function SubtitleWorkbench({ langs }: { langs: any[] }) {
           </div>
         </>
       )}
+      <Modal open={active && confirmFull} onClose={() => setConfirmFull(false)} title="重新翻译全部字幕？" footer={<><Button data-modal-initial="cancel" onClick={() => setConfirmFull(false)}>取消</Button><Button kind="primary" onClick={() => { setConfirmFull(false); void startFull() }}>确认全部翻译</Button></>}>
+        将覆盖现有译文和人工修改，并清空撤销历史。请先导出需要保留的内容。新任务使用当前目标语言和术语本。
+      </Modal>
+      <Modal open={active && confirmExport} onClose={() => setConfirmExport(false)} title="确认导出字幕" footer={<><Button data-modal-initial="cancel" onClick={() => setConfirmExport(false)}>取消</Button><Button kind="primary" onClick={doExport}>保存字幕</Button></>}>
+        <p>{exportFmt} · {bilingual} · 共 {doc?.cues.length ?? 0} 条。未翻译行保留原文；失败行可能保留旧译文，请人工核对。</p>
+        <label className="mt-3 flex items-center gap-2">编码<select aria-label="导出编码" className="bg-sunken border border-line p-2" value={exportEncoding} onChange={e => setExportEncoding(e.target.value)}><option value="utf-8">UTF-8</option><option value="gbk">GBK</option></select></label>
+        {doc?.format === 'ass' && exportFmt !== 'ASS' && <p className="text-warn mt-2">此格式不会保留 ASS 字体、样式与特效。</p>}
+        {exportFmt === 'LRC' && <p className="text-warn mt-2">LRC 仅保留起始时间，结束时间和重叠显示方式由播放器决定。</p>}
+        {bilingual === '原文另存' && <p className="mt-2">另存的 .orig 文件也可能替换同名文件；两个文件会先完成写入再替换。</p>}
+      </Modal>
     </div>
   )
 }

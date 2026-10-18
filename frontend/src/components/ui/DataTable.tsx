@@ -29,7 +29,7 @@ export interface DataTableProps<T> {
   columns: Column<T>[]
   rows: T[]
   rowKey: (r: T, i: number) => string | number
-  rowHeight?: 32 | 40 | 56
+  rowHeight?: number
   /** 默认 rows.length > 200 自动开 */
   virtual?: boolean
   selectable?: boolean
@@ -133,6 +133,13 @@ export function DataTable<T>({
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (rows.length === 0) return
+    if ((e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && onRowContextMenu) {
+      e.preventDefault()
+      const row = containerRef.current?.querySelector(`#${CSS.escape(gridId)}-row-${activeIdx}`)
+      const rect = row?.getBoundingClientRect()
+      onRowContextMenu({ preventDefault() {}, clientX: rect?.left ?? 0, clientY: rect?.bottom ?? 0 } as React.MouseEvent, rows[activeIdx])
+      return
+    }
     const move = (to: number) => {
       e.preventDefault()
       setActiveIdx(Math.min(rows.length - 1, Math.max(0, to)))
@@ -228,7 +235,12 @@ export function DataTable<T>({
                （↑↓ 移动 + Enter 触发 onRowClick），div-click 规则在此按场景豁免。 */
             const rowClickProps = onRowClick
               ? // lint-allow: div-click —— ARIA grid 行 div；键盘可达由容器 Enter/↑↓ 承担（§5.7）
-                { onClick: () => onRowClick(row) }
+                { onClick: (event: React.MouseEvent) => {
+                  // 鼠标拖选单元格文字后不触发行点击，以免刷新详情破坏选区。
+                  const selection = window.getSelection()
+                  if (selection?.isCollapsed === false && (event.currentTarget.contains(selection.anchorNode) || event.currentTarget.contains(selection.focusNode))) return
+                  onRowClick(row)
+                } }
               : {}
             const rowContextProps = onRowContextMenu
               ? // lint-allow: div-contextmenu —— ARIA grid 行 div；右键菜单由容器键盘操作承担

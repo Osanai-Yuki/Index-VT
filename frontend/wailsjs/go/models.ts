@@ -73,6 +73,7 @@ export namespace config {
 	    }
 	}
 	export class Config {
+	    loggingEnabled: boolean;
 	    inference: Inference;
 	    resource: Resource;
 	    download: Download;
@@ -87,6 +88,7 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.loggingEnabled = source["loggingEnabled"];
 	        this.inference = this.convertValues(source["inference"], Inference);
 	        this.resource = this.convertValues(source["resource"], Resource);
 	        this.download = this.convertValues(source["download"], Download);
@@ -145,6 +147,9 @@ export namespace docpipeline {
 	    translation: string;
 	    sourceChunks: number;
 	    hitChunks: number;
+	    sourceOccurrences: number;
+	    targetOccurrences: number;
+	    missingChunks?: number[];
 	
 	    static createFrom(source: any = {}) {
 	        return new TermCoverage(source);
@@ -156,6 +161,9 @@ export namespace docpipeline {
 	        this.translation = source["translation"];
 	        this.sourceChunks = source["sourceChunks"];
 	        this.hitChunks = source["hitChunks"];
+	        this.sourceOccurrences = source["sourceOccurrences"];
+	        this.targetOccurrences = source["targetOccurrences"];
+	        this.missingChunks = source["missingChunks"];
 	    }
 	}
 	export class Doc {
@@ -375,13 +383,30 @@ export namespace main {
 	        this.glossaryId = source["glossaryId"];
 	    }
 	}
+	export class LogCleanupResult {
+	    removed: number;
+	    skipped: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new LogCleanupResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.removed = source["removed"];
+	        this.skipped = source["skipped"];
+	    }
+	}
 	export class SystemStatus {
 	    orchestration: string;
 	    activeModel: string;
+	    runningModel: string;
+	    loadedCtxTokens: number;
 	    port: number;
 	    gpu: envprobe.GPU;
 	    idleMinutes: number;
 	    idleSeconds: number;
+	    idleReleaseSeconds: number;
 	    activeTasks: number;
 	    version: string;
 	    offline: boolean;
@@ -395,10 +420,13 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.orchestration = source["orchestration"];
 	        this.activeModel = source["activeModel"];
+	        this.runningModel = source["runningModel"];
+	        this.loadedCtxTokens = source["loadedCtxTokens"];
 	        this.port = source["port"];
 	        this.gpu = this.convertValues(source["gpu"], envprobe.GPU);
 	        this.idleMinutes = source["idleMinutes"];
 	        this.idleSeconds = source["idleSeconds"];
+	        this.idleReleaseSeconds = source["idleReleaseSeconds"];
 	        this.activeTasks = source["activeTasks"];
 	        this.version = source["version"];
 	        this.offline = source["offline"];
@@ -470,6 +498,22 @@ export namespace main {
 
 export namespace modelmanager {
 	
+	export class DownloadLocation {
+	    path: string;
+	    freeBytes: number;
+	    known: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DownloadLocation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.freeBytes = source["freeBytes"];
+	        this.known = source["known"];
+	    }
+	}
 	export class DownloadProgress {
 	    modelId: string;
 	    quant: string;
@@ -725,6 +769,20 @@ export namespace subtitle {
 	        this.outPath = source["outPath"];
 	    }
 	}
+	export class GlossaryTerm {
+	    Term: string;
+	    Translation: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GlossaryTerm(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Term = source["Term"];
+	        this.Translation = source["Translation"];
+	    }
+	}
 	export class QueueOptions {
 	    targetLang: string;
 	    glossaryId?: number;
@@ -772,6 +830,7 @@ export namespace subtitle {
 	    }
 	}
 	export class SubtitleDoc {
+	    revision: number;
 	    id: string;
 	    path: string;
 	    format: string;
@@ -779,6 +838,9 @@ export namespace subtitle {
 	    cues: Cue[];
 	    styles?: StyleDef[];
 	    queueActive?: boolean;
+	    queuePaused: boolean;
+	    canUndo: boolean;
+	    canRedo: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SubtitleDoc(source);
@@ -786,6 +848,7 @@ export namespace subtitle {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.revision = source["revision"];
 	        this.id = source["id"];
 	        this.path = source["path"];
 	        this.format = source["format"];
@@ -793,6 +856,9 @@ export namespace subtitle {
 	        this.cues = this.convertValues(source["cues"], Cue);
 	        this.styles = this.convertValues(source["styles"], StyleDef);
 	        this.queueActive = source["queueActive"];
+	        this.queuePaused = source["queuePaused"];
+	        this.canUndo = source["canUndo"];
+	        this.canRedo = source["canRedo"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

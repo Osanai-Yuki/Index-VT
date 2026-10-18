@@ -560,6 +560,9 @@ func (m *Manager) SetActive(id ModelID) error {
 	if m.orch.ActiveTasks() > 0 {
 		return fmt.Errorf("有翻译/字幕任务进行中，不能切换模型")
 	}
+	if _, _, err := m.ResolveModelPath(id); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.activeID = string(id)
 	m.lastRun[string(id)] = false
@@ -659,5 +662,5 @@ func diskUsage(dir string) diskStat {
 	if r1 == 0 {
 		return diskStat{}
 	}
-	return diskStat{free: int64(freeBytes), total: int64(totalBytes)}
+	return diskStat{free: int64(avail), total: int64(totalBytes)}
 }

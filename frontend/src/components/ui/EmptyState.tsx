@@ -15,7 +15,7 @@ export function EmptyState({ icon, title, body, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center gap-4 py-12 text-center">
       <div className="flex size-12 items-center justify-center text-ink3">{icon}</div>
-      <h3 className="text-title text-ink2">{title}</h3>
+      <h2 className="text-title text-ink2">{title}</h2>
       {body && <p className="max-w-(--suj-measure-body) text-caption text-ink3">{body}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>

@@ -164,19 +164,18 @@ async function main() {
     record('KB1', `Tab 遍历 ${stopsCount} 个停靠点且全部有焦点环（下限 ${MIN_STOPS}）`, stopsCount >= MIN_STOPS && allRinged ? 'pass' : 'fail', firstNonRing ? `首个无环停靠点：${firstNonRing}` : stopsCount < MIN_STOPS ? `停靠点 ${stopsCount} < 下限 ${MIN_STOPS}` : '')
 
     /* ── 2. Segmented 方向键改值（本页无 radiogroup → SKIP）──────── */
-    const hasRadioGroup = (await page.locator('[role="radiogroup"]').count()) > 0
+    // Cached pages may remain in the DOM under hidden containers. Keyboard
+    // checks must target the accessible page, just as Tab navigation does.
+    const radioGroup = page.getByRole('radiogroup').first()
+    const hasRadioGroup = (await radioGroup.count()) > 0
     if (!hasRadioGroup) {
       record('KB2', 'Segmented ←→ 改值', 'skip', '本页无 radiogroup；该组件的能力由陈列页覆盖')
       record('KB2b', 'Segmented Home 跳首', 'skip', '同上')
     } else {
-      const checkedText = () =>
-        page.evaluate(() => document.querySelector('[role="radiogroup"] [role="radio"][aria-checked="true"]')?.textContent?.trim() ?? '')
-      const firstText = () =>
-        page.evaluate(() => document.querySelector('[role="radiogroup"] [role="radio"]')?.textContent?.trim() ?? '')
-      await page.evaluate(() => {
-        const el = document.querySelector('[role="radiogroup"] [role="radio"][aria-checked="true"]')
-        if (el instanceof HTMLElement) el.focus()
-      })
+      const checked = radioGroup.getByRole('radio', { checked: true })
+      const checkedText = async () => (await checked.textContent())?.trim() ?? ''
+      const firstText = async () => (await radioGroup.getByRole('radio').first().textContent())?.trim() ?? ''
+      await checked.focus()
       const beforeSeg = await checkedText()
       await page.keyboard.press('ArrowRight')
       const afterSeg = await checkedText()
@@ -188,7 +187,7 @@ async function main() {
     }
 
     /* ── 3. Switch Space 切换（本页无 Switch → SKIP）─────────────── */
-    const sw = page.locator('[role="switch"]').first()
+    const sw = page.getByRole('switch').first()
     if ((await sw.count()) === 0) {
       record('KB3', 'Switch Space 切换', 'skip', '本页无 Switch；该组件的能力由陈列页覆盖')
     } else {

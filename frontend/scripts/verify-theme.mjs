@@ -180,11 +180,11 @@ async function runBrowserAssertions(page) {
   await page.goto(DEV_URL, { waitUntil: 'domcontentloaded' })
   await page.waitForLoadState('networkidle').catch(() => {})
   /* 字体是 font-display: swap，等它们真正落地再测，避免拿到回退字体的度量。
-     v2.1 起内嵌三份：Archivo（拉丁）+ Noto Sans SC 子集（中文）+ JetBrains Mono（等宽）。 */
+     v2.2 起内嵌三份：Public Sans（拉丁）+ Noto Sans SC 子集（中文）+ Geist Mono（等宽）。 */
   await page.evaluate(async () => {
     await Promise.all([
-      document.fonts.load('400 16px "JetBrains Mono"'),
-      document.fonts.load('600 16px Archivo'),
+      document.fonts.load('400 16px "Geist Mono"'),
+      document.fonts.load('600 16px "Public Sans"'),
       document.fonts.load('400 16px "Noto Sans SC"'),
     ])
     await document.fonts.ready
@@ -333,8 +333,8 @@ async function runBrowserAssertions(page) {
     el.remove()
     return out
   })
-  const monoOk = mono.varValue.startsWith("'JetBrains Mono'") && !/IBM Plex/i.test(mono.fontFamily)
-  record(6, "[附加·R29] --font-mono 由新层取胜（JetBrains Mono 栈，非旧 IBM Plex）", monoOk, [
+  const monoOk = mono.varValue.startsWith("'Geist Mono'") && !/IBM Plex/i.test(mono.fontFamily)
+  record(6, "[附加·R29] --font-mono 由新层取胜（Geist Mono 栈，非旧 IBM Plex）", monoOk, [
     `--font-mono = ${mono.varValue}`,
     `.font-mono.num computed font-family = ${mono.fontFamily}`,
     `.num computed font-variant-numeric = ${mono.fontVariantNumeric}`,
@@ -347,35 +347,41 @@ async function runBrowserAssertions(page) {
     document.fonts.forEach((f) => faces.push(`${f.family} ${f.weight} ${f.status}`))
     return {
       faces,
-      jbm: document.fonts.check('400 16px "JetBrains Mono"'),
-      archivo: document.fonts.check('600 16px Archivo'),
+      mono: document.fonts.check('400 16px "Geist Mono"'),
+      app: document.fonts.check('600 16px "Public Sans"'),
       noto: document.fonts.check('400 16px "Noto Sans SC"'),
       /* v2.1 已弃用 Inter：若仍注册即为回归（字体栈或 @font-face 被人加回来了） */
       interRegistered: faces.some((f) => f.startsWith('Inter ')),
+      /* v2.2 换字体：Archivo / JetBrains Mono 已退役，若仍注册说明 @font-face 没换干净 */
+      retiredRegistered: faces.some((f) => /^(Archivo|JetBrains Mono) /.test(f)),
     }
   })
-  const jbmFile = fontResponses.find((r) => r.url.includes('jetbrains-mono-latin'))
-  const archivoFile = fontResponses.find((r) => r.url.includes('archivo-latin'))
+  const monoFile = fontResponses.find((r) => r.url.includes('geist-mono-latin'))
+  const appFile = fontResponses.find((r) => r.url.includes('public-sans-latin'))
   const notoFile = fontResponses.find((r) => r.url.includes('noto-sans-sc-cjk'))
   const interFile = fontResponses.find((r) => r.url.includes('inter-latin'))
+  const retiredFile = fontResponses.find((r) => /(archivo|jetbrains-mono)-latin/.test(r.url))
   const external = fontResponses.filter((r) => r.external)
   const fontsOk = Boolean(
-    jbmFile && jbmFile.status === 200 &&
-    archivoFile && archivoFile.status === 200 &&
+    monoFile && monoFile.status === 200 &&
+    appFile && appFile.status === 200 &&
     notoFile && notoFile.status === 200 &&
-    fontFaces.jbm && fontFaces.archivo && fontFaces.noto &&
+    fontFaces.mono && fontFaces.app && fontFaces.noto &&
     !interFile && !fontFaces.interRegistered &&
+    !retiredFile && !fontFaces.retiredRegistered &&
     external.length === 0,
   )
   const short = (r) => (r ? `${r.status} ${r.url.replace(/^https?:\/\/[^/]+/, '')}` : '未请求')
-  record(7, '[附加·离线字体] 三份 woff2 均被请求（200）且可用；无 Inter、无站外请求', fontsOk, [
+  record(7, '[附加·离线字体] 三份 woff2 均被请求（200）且可用；无 Inter/退役字体、无站外请求', fontsOk, [
     `字体请求共 ${fontResponses.length} 条：${fontResponses.map(short).join(' | ') || '（无）'}`,
-    `jetbrains-mono-latin → ${short(jbmFile)}`,
-    `archivo-latin → ${short(archivoFile)}`,
+    `geist-mono-latin → ${short(monoFile)}`,
+    `public-sans-latin → ${short(appFile)}`,
     `noto-sans-sc-cjk → ${short(notoFile)}`,
     `inter-latin → ${interFile ? `仍被请求（${interFile.status}）——v2.1 应已移出仓库` : '未请求（符合预期）'}`,
+    `已退役字体（archivo / jetbrains-mono）→ ${retiredFile ? `仍被请求（${retiredFile.status}）——v2.2 应已移出仓库` : '未请求（符合预期）'}`,
     `@font-face 里是否残留 Inter：${fontFaces.interRegistered ? '有（违规）' : '无'}`,
-    `check: jbm=${fontFaces.jbm} archivo=${fontFaces.archivo} noto=${fontFaces.noto}`,
+    `@font-face 里是否残留退役字体：${fontFaces.retiredRegistered ? '有（违规）' : '无'}`,
+    `check: mono=${fontFaces.mono} app=${fontFaces.app} noto=${fontFaces.noto}`,
     `已注册 @font-face：${fontFaces.faces.join(' | ') || '（无）'}`,
     `指向站外的字体请求：${external.length ? '有（违规）→ ' + external.map((r) => r.url).join(', ') : '无（符合离线约束）'}`,
   ].join('\n'))
@@ -490,6 +496,80 @@ async function main() {
     `扫描 ${DIST}（${countFiles(DIST)} 个文件），needle = ${CDN_NEEDLES.join(' , ')}`,
     hits.length === 0 ? '0 命中' : `${hits.length} 命中：\n${hits.join('\n')}`,
     `产物内的本地字体文件：${woff2.length ? woff2.join(', ') : '（无）'}`,
+  ].join('\n'))
+  console.log('')
+
+  /* ── #11（发布阻塞项 A1）三份字体许可证必须随产物分发 ────────────
+     OFL 1.1 §2 的原话是"每一份拷贝都要带上上面的版权声明与本许可证"，
+     且明确列出三种可接受的载体（独立文本文件 / 可读头 / 机器可读元数据），
+     条件是"那些字段必须能被用户轻易看到"。
+     本应用是 Wails 单文件 exe：字体是内嵌的 woff2，用户打不开二进制里
+     的 name 表，所以"机器可读元数据"这一路走不通，必须落成独立文本文件。
+     这些文件放在 `frontend/public/licenses/`（Vite 原样拷到 dist 根），
+     不能放在 `src/assets/fonts/` —— 那里没有被任何模块 import，
+     Vite 会静默丢弃，这正是修复前的真实缺陷：字体进了 exe，许可证没有。 */
+  const LICENSE_DIR = path.join(DIST, 'licenses')
+  const LICENSE_FILES = [
+    { file: 'OFL-PublicSans.txt', must: 'Copyright 2015 The Public Sans Project Authors' },
+    { file: 'OFL-NotoSansSC.txt', must: "Reserved Font Name 'Source'" },
+    { file: 'OFL-GeistMono.txt', must: 'Copyright 2024 The Geist Project Authors' },
+  ]
+  const licenseChecks = LICENSE_FILES.map(({ file, must }) => {
+    const full = path.join(LICENSE_DIR, file)
+    if (!fs.existsSync(full)) return { file, ok: false, why: '未随产物分发（OFL §2 不满足）' }
+    const text = fs.readFileSync(full, 'utf8')
+    const hasOfl = /SIL OPEN FONT LICENSE Version 1\.1/.test(text)
+    const hasNotice = text.includes(must)
+    return {
+      file,
+      ok: hasOfl && hasNotice,
+      why: hasOfl && hasNotice ? `OFL 1.1 全文 + ${must}` : `缺 ${[!hasOfl && 'OFL 正文', !hasNotice && must].filter(Boolean).join(' / ')}`,
+    }
+  })
+  const licensesOk = licenseChecks.every((c) => c.ok)
+  record(11, '[发布阻塞项 A1] dist/licenses/ 内三份 OFL 许可证齐全（字体随 exe 分发的前提）', licensesOk, [
+    ...licenseChecks.map((c) => `${c.ok ? 'OK  ' : 'MISS'} ${c.file} — ${c.why}`),
+    '依据：OFL 1.1 §2 要求每份拷贝含版权声明+许可证，且"能被用户轻易看到"；',
+    '内嵌 woff2 的 name 表在单文件 exe 里用户看不到，故必须附独立文本文件。',
+    `来源：frontend/public/licenses/（Vite 原样拷贝到 dist 根；放 src/assets/ 会被静默丢弃）`,
+  ].join('\n'))
+
+  /* ── #12 OFL §3：子集是 Modified Version，换字体必须先过授权审计 ──
+     build-subsets.py 会钳制 fvar 的 wght 轴并重写 instances，所以产物在 OFL
+     定义下就是 Modified Version，§3 由此生效："不得使用保留字体名，除非得到
+     版权持有人的书面许可"。三份内嵌字体的审计结果（2026 v2.2 换字后）：
+       Public Sans —— OFL 未声明保留名（USWDS）→ 用原名合法
+       Geist Mono  —— OFL 未声明保留名（Vercel）→ 用原名合法
+       Noto Sans SC —— Adobe 版权，保留名 'Source'；子集族名不含它 → 合法
+     注意不能靠 grep woff2 二进制来验这条：woff2 的 name 表在 brotli 压缩流里，
+     明文搜索恒为 0 命中，那样的断言永远"通过"却什么都没检查。
+     改为**授权审计白名单**：@font-face 里出现的每个族名都必须在表内登记过，
+     换字体时若不更新这张表，门禁就红 —— 迫使新字体先被人工审一遍许可证。 */
+  const FONT_LICENSE_AUDIT = {
+    'Public Sans': 'OFL 1.1 · 无保留字体名（Copyright 2015 The Public Sans Project Authors）',
+    'Noto Sans SC': "OFL 1.1 (Adobe) · 保留名 'Source' —— 子集族名不含它，§3 满足",
+    'Geist Mono': 'OFL 1.1 · 无保留字体名（Copyright 2024 The Geist Project Authors）',
+  }
+  const cssFiles = fs.existsSync(path.join(DIST, 'assets'))
+    ? fs.readdirSync(path.join(DIST, 'assets')).filter((f) => f.endsWith('.css'))
+    : []
+  const embeddedFamilies = new Set()
+  for (const cssFile of cssFiles) {
+    const css = fs.readFileSync(path.join(DIST, 'assets', cssFile), 'utf8')
+    for (const block of css.match(/@font-face\s*\{[^}]*\}/g) ?? []) {
+      const family = block.match(/font-family\s*:\s*['"]?([^;'"]+)/)?.[1]?.trim()
+      /* 产物里的族名可能被压缩器改写（chunk 级字面量提升），保留原样的才登记 */
+      if (family) embeddedFamilies.add(family)
+    }
+  }
+  const unaudited = [...embeddedFamilies].filter((f) => !(f in FONT_LICENSE_AUDIT))
+  const auditOk = unaudited.length === 0 && embeddedFamilies.size > 0
+  record(12, '[OFL §3] 内嵌字体族名均已在许可证审计表登记', auditOk, [
+    `产物 @font-face 族名：${[...embeddedFamilies].join(' | ') || '（未读到，检查 CSS 是否内联到 JS）'}`,
+    ...Object.entries(FONT_LICENSE_AUDIT).map(([family, audit]) => `  ${family} → ${audit}`),
+    unaudited.length === 0
+      ? '全部已登记：子集虽属 Modified Version，但未使用任何保留字体名'
+      : `未审计：${unaudited.join(', ')} —— 换字体必须先在 verify-theme.mjs 登记其许可证结论`,
   ].join('\n'))
   console.log('')
 

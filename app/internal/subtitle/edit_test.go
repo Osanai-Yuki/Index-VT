@@ -286,7 +286,7 @@ func TestInsertCue_AtStart(t *testing.T) {
 func TestEdit_QueueActiveGuard(t *testing.T) {
 	e := NewEngine(nil)
 	e.docs["test"] = makeTestDoc()
-	e.queueCancel["test"] = &queueCtl{cancel: func() {}, paused: make(chan struct{}, 1), resume: make(chan struct{}, 1)}
+	e.queueCancel["test"] = &queueCtl{cancel: func() {}, resume: make(chan struct{}, 1)}
 	_, err := e.UpdateCue("test", 1, CuePatch{})
 	if err == nil {
 		t.Error("队列进行中 UpdateCue 应返回错误")

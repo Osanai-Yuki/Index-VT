@@ -1,412 +1,137 @@
 # Index-VT
 
-Windows 上的全本地 AI 翻译工具。主翻译台、字幕工作台、模型中心、设置都在本机跑，
-推理由 `llama-server` 承担。除模型下载外不联网，没有遥测。术语本的增删改查后端齐了，
-但界面还没接（见「已知限制」）。
+**Local translation for text, subtitles, and long documents on Windows.**
 
-- 技术栈：Go 1.25+ · Wails v2.16 · React 18 · TypeScript 5.7 · Tailwind CSS 4 · SQLite · llama.cpp
-- 推理后端：`llama-server`（llama.cpp），应用按需拉起与回收，空闲自动卸载以释放显存
-- 便携布局：`models/` 和 `logs/` 就在 exe 所在目录，整个文件夹拷走即搬家
+English · [简体中文](README.zh-CN.md)
 
-三个模型的现状并不齐平，读文档时请带上这个前提：`translate` 有完整前后端链路；
-`homura`（配音）后端已实现，主翻译台有配音模式入口（F-07）；`nailong`（长文档）
-下载/登记/翻译管线（`docpipeline`）均已实现，文档翻译页已接入导航
-（Rail → 文档翻译），仅差真机验证（F-08）。
+I built Index-VT to keep translation, terminology, and subtitle editing in one desktop workspace. It runs IndexTeam's translation models through a local `llama-server` process, so the text you translate stays on your computer. Once the engine and models are installed, translation works offline; model downloads require a network connection.
 
-> 运行前必读：`thirdparty/llama-server/` 与 `models/` 被 `.gitignore` 排除，干净克隆里两者都不存在。
-> 必须先补齐（见「首次准备」），否则应用会提示缺少 llama-server。
+Developed and maintained by **Osanai-Yuki**. This is an independent desktop application; the upstream models and inference engine belong to their respective authors.
 
----
+> **Development preview.** The workflows below are implemented, but testing on real hardware is still in progress. The interface is primarily Simplified Chinese, with some English labels. These two README versions do not imply a fully localized English interface.
 
-## 当前状态（2026-10-09 同步）
+![Index-VT translation workspace](docs/assets/screenshots/translation-light.png)
 
-| 阶段 | 状态 |
-|---|---|
-| 设计契约（DESIGN.md v2.1 瑞士风格 / PRD / 动效规范 / spec） | 完成 |
-| Track A 后端止血（B1–B31：崩溃、死锁、丢数据、安全边界） | 已完成并合并 `master`；13 个 Go 包全部有测试且全绿 |
-| Track B 前端地基（双主题 token / 23 原语 / 事件层 / 九道门禁） | 已完成并合并 `master` |
-| Track C 页面迁移（5 个页面 + 外壳迁到新设计系统并接线） | 已完成并合并 `master` |
-| 瑞士风格重映射（v2.1） | 完成；两层 token 值整体切换为 Swiss International |
-| 翻译模式系统（5 个内置领域模板 + 自定义模式） | 完成 |
-| 模型下载反馈（进度条 + 阶段 toast + 下载完即可启用） | 完成 |
-| 显存估算按实测重标（`internal/vramestimate`） | 完成；回归锁 `TestForNeverUnderPredictsMeasured` |
-| **M5 长文档翻译** | **完成**（待真机验证）；docpipeline 引擎（chunker + pipeline）、术语注入、覆盖率度量、后端绑定 6 个（DocTranslate/DocResume/DocCancel/DocGetDoc/DocExport/DocPick）、前端页面 `DocTranslate.tsx`（已接入导航：Rail 解灰 + `App.tsx` 路由到 `DocTranslatePage`）均已实现；`verify:pages` 三组门禁均含 doc 页靶子；F-08 用例待验证 |
-| **M4 字幕编辑与样式** | **完成**；引擎五操作+删除插入+样式引擎、10 个后端绑定、F-22 虚拟化（DataTable 56px）、行内编辑（原文/译文/时间 ±100ms）、平移/校准 Modal、样式库面板+ASS 序列化、右键菜单、预览画布（16:9）均完成；**真机验证首轮已过**（行内编辑/±100ms/删除末条/样式 Modal 等 6 项，另抓到并修复校准空输入数据破坏 bug），剩余面转下轮（状态报告「十一」）。设计文档见 `docs/superpowers/specs/2026-10-07-m4-subtitle-editing-design.md` |
-| **全量 QA 复检（BUG/安全审查）** | **完成**（2026-10-09）；后端/前端逐包逐页审查 + 7 项缺陷修复（含 1 项白屏崩溃、1 项真机抓到的数据破坏）、安全面全查（注入/穿越/SQL/下载/XSS）未发现高危漏洞；交互回归 11/11、全部门禁复跑全绿。详见 `docs/项目状态报告-2026-10-08.md`「十」「十一」 |
-| 集成与出包 | M4 全部 + M5 前端 + QA 修复 ×6 已提交（`b50c496`）；真机抓到的第 7 项修复已提交（`e4db065`）；exe 已于 2026-10-09 19:35 重建（含修复 ×7，嵌入自检通过） |
+*Translation workspace, captured on 2026-10-17 with development demo data. Screenshots illustrate the interface; they are not translation-quality or performance benchmarks.*
 
-**项目规模**：Go 源文件 70 个（39 实现 + 31 测试），前端源文件 49 个，UI 组件 23 个原语，页面 6 个。
+## What you can do
 
-**验收用例**：24 条用例中，12 条发布阻塞项（★）已实现 12 条待真机验证；M4 相关 F-17（行内编辑/平移/校准/右键菜单完成）、F-18（样式库面板+ASS 序列化+预览画布完成）、F-22（虚拟化完成）均已实现。
+| Workspace | Features |
+| --- | --- |
+| Text translation | Streaming output, source/target language selection, built-in and custom translation presets, terminology hints, local history and favorites. |
+| Subtitles | Import SRT, ASS, VTT, and LRC; translate a queue; pause, cancel, and retry failures; edit text and timing; split/merge cues; shift/calibrate timing; undo/redo edits; export translated or bilingual subtitles. |
+| Long documents | Import TXT or Markdown, translate in chunks with Index-Nailong, continue an interrupted task during the same application session, inspect terminology matches, and export translation or bilingual text. |
+| Models and terminology | Download supported GGUF models, choose Q4_K_M or Q8_0, manage detected model files, and create/import/export glossary books using CSV or TSV. |
+| Desktop controls | Light/dark/system themes, inference settings, local diagnostics, startup model loading, and automatic model release after inactivity. |
 
-**下一步重点**（完整规划见 `docs/项目状态报告-2026-10-08.md`「七」）：
-1. ~~产物收口~~（2026-10-09 完成：`b50c496` 提交 + exe 重建 + 基线复跑全绿）
-2. M4 真机验证（F-17/F-18，含 QA 修复点回归）
-3. 完成 M5 真机验证（F-08 长文档翻译用例）
-4. 准备 M6 性能与环境验收（JetBrains Mono 许可证为发布阻塞项）
+![Index-VT subtitle workspace](docs/assets/screenshots/subtitles.png)
 
-详细状态报告见 `docs/项目状态报告-2026-10-08.md`。
+*Subtitle workspace with demo cues. The built-in preview is intended for editing; check complex ASS effects in your target player.*
 
-### 页面级门禁首轮抓出的 4 个真缺陷（2026-10-06，均已修）
+## Getting started
 
-| 缺陷 | 症状 | 修法 |
-|---|---|---|
-| `Settings.tsx` 的 `Row` 定义在组件体内 | 每次渲染生成新组件类型 → 整棵 Row 子树重建：输入框敲第二个字符就丢焦点；Modal 打开时触发按钮节点被销毁，关闭后焦点落到 `<body>` | `Row` 提到模块作用域（`Settings.tsx:17`） |
-| `ModelHub` 把 `ListUnknownModels` 当 `string[]` 用 | 后端返回 `[]ModelInfo`，存在未知模型时页面白屏（`path.split is not a function`） | 边界处取 `m.path`（`ModelHub.tsx:61`） |
-| `--suj-ink-3` 只按白底校验 | 压 `--sunken` (#F0F0F0) 实测 3.99:1（语言栏 AUTO/TARGET 标签） | light 值 `#767676` → `#6A6A6A`（白 5.41 / sunken 4.75） |
-| 瑞士红 `#E60000` 只按白底校验 | 压在 `accentSoft`/`dangerSoft` 6% 底上 4.34:1、sunken 上 4.22:1（模型中心空闲条、"保持加载"、状态栏崩溃徽标） | light `--suj-accent`/`--suj-danger` → `#D40000`（白 5.53 / soft 4.98 / sunken 4.85） |
+### Requirements
 
-外加 Settings 三个裸 `<input>`（ngl / CPU 线程 / 历史上限）补了 `aria-label`——axe 判 critical。
+- **Windows 10/11, x64**, with Microsoft Edge WebView2 Runtime. This project currently targets Windows only.
+- A compatible Windows build of **[llama.cpp](https://github.com/ggml-org/llama.cpp/releases)**, including `llama-server.exe` and the DLLs from that build.
+- At least one supported GGUF model. An NVIDIA GPU with a compatible CUDA runtime is optional; CPU inference is available but speed depends on your machine.
+- Enough disk space for the application, runtime, selected models, and local data. A Q4_K_M model is roughly 1.3 GB; Q8_0 is roughly 2.2 GB. These are model-file sizes, not RAM or VRAM requirements.
 
-### 全量 QA 复检修掉的 7 个缺陷（2026-10-09，均已修）
+### Set up a portable folder
 
-| 缺陷 | 症状 | 修法 |
-|---|---|---|
-| 字幕详情面板 `find(...)!` 非空断言 | 删除最后一条 cue 后整页白屏（`c.index` 抛 TypeError） | 渲染守卫 + 删除后清空选中（`SubtitleWorkbench.tsx`） |
-| 时间 ±100ms 无边界校验 | 连点造出负时间 / 起止倒挂，时间码渲染垃圾、导出非法字幕 | 前端钳制 + `edit.go` `UpdateCue` 校验兜底（+3 回归测试） |
-| 文档页事件未按 docId 过滤 | 翻译中导入新文档，旧文档进度/终态覆盖当前文档甚至换掉显示中的快照 | `docIdRef` 严格匹配过滤（`DocTranslate.tsx`） |
-| 平移/校准 Modal 裸 `<input>` | axe critical（Modal 关闭态不进扫描故此前未暴露） | 补 `aria-label` |
-| `DocExport` 取消保存仍提示「已导出」 | 假成功 toast，误认为文件已落盘 | 绑定返回实际路径（空串=取消），按返回值决定 toast |
-| mock 演示文档永不完成 | `?mock&page=doc` 导出按钮永不出现，导出流程无法验证 | `docDemoDone` 同步进快照 |
-| **校准 Modal 空输入执行校准**（真机抓到） | 输入框留空点「确定」：`Number('')===0` 绕过 isNaN 守卫，第二锚点当 0ms 执行，**整条时间轴被压坏** | `raw !== '' && Number.isFinite(ms) && ms >= 0` 才执行（确定按钮与 Enter 两处） |
+If a release is available in this repository's **Releases** section, read its asset description first. An application-only archive does **not** contain the inference engine or models. GitHub's automatically generated source archives are source code, not a runnable Windows package.
 
-安全面（命令/参数注入、路径穿越、SQL 注入、下载 SSRF/续传/校验、XSS、崩溃/死锁）逐项核查**未发现高危漏洞**；
-遗留低危项 6 条登记在 `docs/已知限制清单-2026-10-09.md`「G 组」。完整 QA 记录见 `docs/项目状态报告-2026-10-08.md`「十」。
+Extract the application to a writable folder and arrange the runtime like this:
 
-## 环境要求
-
-| 依赖 | 版本 | 说明 |
-|---|---|---|
-| Windows | 10 1809+ / 11 | 只做 Windows：`internal/winproc`、`spawn_windows.go`、`envprobe_windows.go` 全是 Windows 专属实现 |
-| Go | ≥ 1.25 | `app/go.mod` 声明 `go 1.25.0`，本机 1.27.1 实测通过 |
-| Node.js | ≥ 20 | Vite 6 + Tailwind 4 |
-| Wails CLI | v2.16.0 | `go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0` |
-| WebView2 Runtime | — | Win11 与较新 Win10 自带；缺失时装 Evergreen Runtime。构建用 `-webview2 embed` 把 loader 打入 exe |
-| NVIDIA 驱动（可选） | — | 有 `nvidia-smi` 走 GPU；没有则自动 CPU 模式，约慢 10 倍，引导页会如实提示 |
-| Shell | Git Bash | 本文命令块按 Git Bash 写（`grep`、`cd x && y` 之类）。PowerShell/CMD 缺这些 Unix 工具，构建自检另给了等价写法 |
-
-## 首次准备
-
-### 1. llama-server（必需）
-
-从 llama.cpp 发布包取 Windows CUDA 版，放到：
-
-```
-thirdparty/llama-server/llama-server.exe      ← 连同其 .dll 一起
+```text
+Index-VT/
+├── Index-VT.exe
+├── thirdparty/
+│   └── llama-server/
+│       ├── llama-server.exe
+│       └── ... DLLs from the same runtime build
+├── models/                  # created by the application
+└── logs/                    # diagnostics, when logging is enabled
 ```
 
-应用按 `thirdparty/llama-server/` → 基准目录 的顺序探测（`app/internal/paths/paths.go:36`）。
-放错位置的症状是引导页报「缺少 llama-server.exe（安装包损坏）」。
+1. Start `Index-VT.exe` and follow the first-run setup.
+2. Download **Index-Translate-2B / Q4_K_M** as a starting point, or place an official supported model file in `models/` before startup.
+3. Open the translation workspace, choose a target language, and translate a short sample.
+4. Download Nailong or Homura only when you need their specialized workflows.
 
-### 2. 模型（必需，二选一）
+Models and runtime binaries are excluded from the source repository. A fresh clone needs them too; cloning the project alone does not install the engine.
 
-应用内下载（推荐）：首次引导或「模型中心」里下载。三档模型 `translate` / `nailong` / `homura`，
-量化档位体积按官方 SHA256SUMS 记：`Q4_K_M` 对 `translate` 是 1,312,164,352 字节（约 1.22 GiB），
-`nailong` / `homura` 用近似值 1,312,000,000（`registry.go:62,81,97`）；`Q8_0` 三者同为 2,235,000,000
-（约 2.08 GiB）。下载支持 HF / ModelScope 双源择优与断点续传。完整性校验是 fail-closed：
-拿不到官方 SHA256SUMS 就拒绝安装，不装未校验的模型，同时保留 `.part` 供重试（`download.go:498`）。
+### Supported model roles
 
-手动放置：把 `.gguf` 放进 `models/`，启动时按两层规则识别：文件名必须严格匹配
-`^Index-(Translate|Nailong|Homura)-2B\.(Q4_K_M|Q8_0)\.gguf$`（大小写不敏感），再用 GGUF 头的
-`general.file_type` 交叉校验量化档位（`modelmanager/manager.go:151`）。改过名、或档位不在 Q4_K_M/Q8_0
-的文件会落到「未知」名单，而当前版本**没有归位入口**：后端 `AssignUnknown` 已绑定，模型中心还没接这个 UI。
-遇到这种情况改回官方文件名最省事。
+| Model | Used for | Current application scope |
+| --- | --- | --- |
+| [Index-Translate-2B](https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF) | General text and subtitle translation | Language selection, translation constraints, and glossary hints. |
+| [Index-Nailong-2B](https://huggingface.co/IndexTeam/Index-Nailong-2B-GGUF) | Long documents | Chinese ↔ English and Chinese ↔ Japanese. TXT/Markdown content is treated as text; exact formatting is not guaranteed. |
+| [Index-Homura-2B](https://huggingface.co/IndexTeam/Index-Homura-2B-GGUF) | Dubbing-oriented text translation | Approximate syllable-budget control. This application does not synthesize audio or dub video. |
 
-### 3. 前端依赖
+The model manager supports **Q4_K_M** and **Q8_0**. For manual installation, keep the official file names, for example `Index-Translate-2B.Q4_K_M.gguf`. Downloads support resuming and Hugging Face/ModelScope sources; installation requires a successful checksum verification. If verification cannot be completed, the partial download is kept for a retry.
 
-```bash
-cd frontend && npm install
-```
+### Everyday use
 
-装完人在 `frontend/`，下面的「构建」要在仓库根跑，记得 `cd ..`。
+- **Text:** choose the languages and a preset, enter your text, then translate. `Ctrl+Enter` starts a translation; `Esc` cancels it.
+- **Subtitles:** import a file, choose a language and optional glossary, translate, inspect the result, then export. Cancel the active queue before editing. Undo history is limited to 20 steps and a memory budget; starting a new translation clears it.
+- **Documents:** import a TXT/MD file and select one of the supported directions. The current import limit is **2 MiB and 50,000 Unicode characters**. Export the result before closing the application.
+- **Glossaries:** manage books in the model/terminology workspace. Entries guide the model through the prompt; they are not guaranteed text replacements or a semantic consistency score.
 
-## 构建
+After setup, the saved default model loads at startup. With no active task, **30 minutes without input** starts a **30-second countdown** to release the model; interaction cancels the countdown, and a later task loads the model again.
 
-在**仓库根目录**跑构建脚本，不要用裸 `wails build`：
+## Your files and privacy
 
-```bash
-cd ..                                       # 若你还在 frontend/ 里，先回仓库根
-node scripts/build.mjs                      # 前端构建 → 同步 embed 目录 → 编译 exe
-node scripts/build.mjs --skip-frontend      # 前端未改，只重新编译 exe
-```
+The normal portable layout keeps data beside the executable:
 
-产出 `app/build/bin/Index-VT.exe`（相对仓库根）。
+| Location | Contents |
+| --- | --- |
+| `models/*.gguf` | Downloaded model weights. |
+| `models/data/indexvt.db` | Local settings, text history, glossary books, and model records. |
+| `logs/` | Application/engine logs and diagnostic archives, if enabled. |
 
-上面那条 `cd ..` 不是多余的。照「首次准备」走完，你人在 `frontend/`，在那里跑
-`node scripts/build.mjs` 会得到：
+The app sends inference requests to `127.0.0.1`; translation does not need a cloud API key. There is no application telemetry. Model downloads contact the configured model host. Logging is off by default; changing it requires a restart. Diagnostic files may contain local paths, so inspect them before sharing.
 
-```
-Error: Cannot find module '...\Index-VT_GUI\frontend\scripts\build.mjs'
-```
+**Export subtitle and document work before exiting.** Switching pages preserves the current session, but those workspaces do not automatically restore unfinished work after a full application restart. Back up the portable folder with the application closed if you want to retain models, settings, history, and glossaries. Development builds can resolve their data folder above the executable; see the [development guide](docs/DEVELOPMENT.md).
 
-因为 `frontend/scripts/` 下只有 `lint-design-tokens.mjs` 和 `verify-*.mjs`，构建脚本在仓库根的
-`scripts/`，两处同名目录容易看漏。脚本内部用 `import.meta.url` 反推仓库根（`scripts/build.mjs:28`），
-后续所有子命令都按那个绝对路径执行，所以工作目录其实不影响构建结果，只要 node 找得到脚本文件——
-在 `frontend/` 下用 `node ../scripts/build.mjs` 一样能成。
+## Build from source
 
-为什么必须走脚本：Go 侧用 `//go:embed all:frontenddist` 嵌入前端（`app/main.go:29`）。vite 产物在
-`frontend/dist`，而 Go 模块根是 `app/`，`go:embed` 不能跨 `..`，所以得先构建前端、再把
-`frontend/dist` 复制进 `app/frontenddist`。该目录是构建产物（已 gitignore），不会自行更新。
+The stack is **Go / Wails v2 / React / TypeScript / Tailwind CSS / SQLite / llama.cpp**.
 
-裸跑 `wails build` 的后果：它会构建前端、编译 Go，但不同步 embed 目录，exe 里嵌的是上一次复制的旧前端。
-源码是新的、界面是旧的，而且完全不报错。这个坑从 2026-10-04 18:52 一直在，`scripts/build.mjs` 就是为它写的。
-
-构建后自检。本文件所有命令块默认按 Git Bash 写，`grep` 在 PowerShell/CMD 里不存在，会报
-`无法将"grep"项识别为 cmdlet...`。按你用的 Shell 选一条，都在仓库根执行：
-
-```bash
-# Git Bash
-grep -ac suj-ink-1 app/build/bin/Index-VT.exe
-```
+Install Go **1.25 or newer** (the selected dependency versions may require a newer toolchain), Node.js **22 or newer**, and Wails CLI **v2.16.0** with its Windows build prerequisites. Run the following in PowerShell from the repository root:
 
 ```powershell
-# PowerShell
-(Select-String -Path app/build/bin/Index-VT.exe -Pattern 'suj-ink-1' -SimpleMatch -Encoding utf8).Count
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+npm --prefix frontend ci
+node scripts/build.mjs
 ```
 
-```bash
-# 任意 Shell（Node 是必需依赖，这个最省事，且数的是出现次数）
-node -e "const b=require('fs').readFileSync('app/build/bin/Index-VT.exe');const p=Buffer.from('suj-ink-1');let c=0,i=0;while((i=b.indexOf(p,i))>=0){c++;i++}console.log(c)"
-```
+The executable is written to `app/build/bin/Index-VT.exe`. Add the runtime/model files as described above to use it.
 
-本机当前 exe 实测：grep 输出 1，PowerShell 输出 1，Node 输出 7（同一串出现 7 次，前两者数的是行）。
+**Use the build script for a production build.** It builds the frontend, copies it into Go's embed directory, and then builds the executable. A direct `wails build` does not perform that synchronization in this repository and can embed an older interface.
 
-非 0 说明新 token 层的样式串确实进了 exe，能证明「嵌的是新前端」，但前两条数的是行数，
-证明不了它是本次构建的产物。要确认新鲜度看 exe 的 mtime。
+For local development, test commands, and browser demos, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-`--skip-frontend` 要求 `frontend/dist/index.html` 已存在（之前完整跑过一次），否则脚本会直接报错退出，
-不会拿旧 dist 凑数。
+## Current limitations
 
-## 运行
+I am still validating real Windows workflows and translation quality across representative material. Browser checks with demo data do not establish model quality or complete native-dialog coverage.
 
-路径同样相对仓库根：
+- Translation can omit, distort, or invent content. Check important output against the source; terminology-match counts are review hints.
+- Full restart recovery is not available for subtitle/document sessions. A document continuation uses the original task's direction and terminology.
+- Complex ASS styling and behavior can differ from external players. Document chunking can change whitespace and layout.
+- Homura's syllable count and the displayed GPU-memory estimates are approximate; neither is a hardware or output guarantee.
+- Real IME input, unusual display scaling, interrupted downloads, low disk space, CPU performance, and driver/OOM recovery still need broader acceptance testing.
 
-```bash
-app/build/bin/Index-VT.exe            # 启动
-app/build/bin/Index-VT.exe -version   # 打印版本后退出
-```
+Existing engineering records are indexed in [docs/README.md](docs/README.md). They are dated evidence, not a promise that every scenario has passed on every machine.
 
-- 单实例：再次启动会激活已有窗口。若单实例锁创建失败（权限或策略异常），应用照常启动而不是静默退出
-  （`app/main.go:58`，fail-open）
-- 窗口：1280×800 起，最小 1180×700（`app/main.go:90`）
-- 退出：点窗口 X 或 Ctrl+Q 都走优雅退出。顺序是取消任务 → 向 `llama-server` 发 CTRL_BREAK →
-  等 3s → 超时则 `TerminateProcess` → 等 Job Object 句柄确认 → 关闭 SQLite。`Ctrl+Q` 只在前端绑定
-  （`frontend/src/App.tsx:52`），`wails.json` 里没有菜单或快捷键配置
-- 关闭 SQLite 是无条件的（`app/app.go:265`）。WAL 的 checkpoint 依赖最后一个连接关闭时自动完成，
-  代码里没有显式 `PRAGMA wal_checkpoint`
-- 强杀也安全，但不推荐：子进程在带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object 里
-  （常量 `app/internal/winproc/job_windows.go:18`，设置 `:65`），任务管理器强杀主进程不会留下孤儿推理进程。
-  这是 Track A 专门补的：`CREATE_SUSPENDED` + 先入 job 再 `ResumeThread`，消除崩溃窗口期。
-  代价是跳过优雅停止与应用侧清理，WAL 靠下次启动恢复。优先用 X / Ctrl+Q
-- 空闲卸载：无任务持续 N 分钟自动卸载。设置页 1–30 分钟，或设 0 常驻；越界值会被 `config.Normalize`
-  收敛回默认 5 分钟（`app/internal/config/config.go:98`）
-- 主题：默认 `system` 跟随系统，设置页可显式切换 light/dark 并持久化
-  （`frontend/src/theme/theme.ts` + `Settings.tsx:163`，存 localStorage
-  `indexvt.theme` 与配置 `appearance.theme`，重启保持）
+## Feedback
 
-### 数据与日志位置
+When reporting a problem, include the application version (`Index-VT.exe -version`), Windows version, GPU/CPU, model and quantization, selected context size, and the steps to reproduce. A small input you are comfortable sharing is more useful than an entire private document. Attach logs only after checking their contents.
 
-| 路径 | 内容 |
-|---|---|
-| `models/data/indexvt.db` | SQLite：历史记录、配置、术语本、模型登记 |
-| `models/` | 模型文件（`.gguf`）与下载中的 `.part` |
-| `logs/indexvt-YYYYMMDD.log` | 运行日志。启动时按 mtime 清掉 7 天前的，没有按大小轮转 |
-| `logs/llama-server.out.log` | 推理进程输出 |
+## Copyright and licensing
 
-- 基准目录解析（`app/internal/paths/paths.go`）：环境变量 `INDEXVT_ROOT` 最高优先（开发/测试用，
-  测试靠它把 `models/` 隔离到临时目录）；否则从 exe 所在目录起向上最多 4 层找第一个「已装配根」——
-  含 `thirdparty/llama-server/llama-server.exe`（或与根同级 `llama-server.exe`）、或 `models/` 下已有
-  完整 `.gguf` 的目录；找不到才回落 exe 所在目录。正常分发 exe 与资产同级，第一层即命中，行为同旧版；
-  在仓库检出内直接跑 `app/build/bin/Index-VT.exe` 时会回溯到仓库根，直接用上 `thirdparty/` 与
-  `models/` 里的现成资产。空 `models/`、`.part` 半成品、`data/` 都不算装配证据 —— 没有这条回溯时，
-  旧版会看不见已下载的模型，引导页每次启动都自动重新下载，且 llama-server 永远探测不到（B33 修复）
-- 「设置 → 一键收集打包」产出的 zip 默认不含 `llama-server.out.log`（`app/logs.go:15`）。
-  实测本机仅存的一份样本 25 行，只有启动信息、模型绝对路径与监听端口，`grep 请将以下` 零命中，
-  也就是说那次运行没记正文。但日志内容随 llama-server 的 `-lv` 级别变化，级别提高后的行为没实测，
-  所以默认排除是正确选择。注意该日志会写模型绝对路径，自行分享时等于交出本机目录结构
+**Copyright (c) 2026 Osanai-Yuki.** This notice covers original project work; third-party materials retain their own ownership and terms. See [COPYRIGHT](COPYRIGHT) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## 开发
+Original Index-VT code, documentation, and interface assets are available under the **[MIT License](LICENSE)**. Model weights, fonts, dependencies, and runtime binaries retain their respective upstream licenses. See the [licensing guide](docs/LICENSING.zh-CN.md) for scope and distribution details.
 
-```bash
-# 热重载整应用（Go + 前端）
-cd app && wails dev
-
-# 只跑前端（无 Go 后端；浏览器里 Wails 运行时不存在，UI 会容忍）
-cd frontend && npm run dev
-
-# 陈列页需要显式绑到 127.0.0.1
-cd frontend && npx vite --host 127.0.0.1 --port 5173    # → http://127.0.0.1:5173/?primitives
-```
-
-裸跑 `npm run dev` 只监听 `[::1]:5173`，用 `127.0.0.1` 取不到页面；所有 verify 脚本自带
-`--host 127.0.0.1`，所以脚本里能跑通、手工照 README 敲就会失败。
-本机 `connect()` 到 `::1` 返回 EACCES，这是显式用 IPv4 的原因。
-
-陈列页只渲染新设计系统，不 import Wails，因此不需要后端。它是**常设的 dev-only 工具**：
-原语速查 + 组件层的门禁靶子（a11y/对比度/键盘/虚拟化/事件隔离五处断言都指向它）。
-
-真实页面在浏览器里没有 Go 后端，会渲染成空态。要看带数据的形态（也是页面级门禁的供数方式），
-加 `?mock` 开 dev 假后端（`lib/mockbackend.ts`，只在本文件被 `import.meta.env.DEV` + 动态 import
-拉到，生产包不含）：
-
-```bash
-cd frontend && npx vite --host 127.0.0.1 --port 5173
-#  http://127.0.0.1:5173/?mock&page=model     初始页 = 模型中心
-#  http://127.0.0.1:5173/?mock&fresh=1        config.onboarded=false，看首次引导
-#  http://127.0.0.1:5173/?mock&page=subtitle  字幕页（点「导入字幕」出一份 48 条 cue 的样例）
-```
-
-假后端覆盖 `wailsapi.ts` 里全部 54 个绑定（另有一个未封装的 `ExportGlossaryCSV`，
-同样已实现）；未覆盖的方法 resolve(null) 并在控制台点名。
-
-## 验证门禁
-
-```bash
-# 后端
-cd app && go build ./... && go vet ./... && go test ./...
-
-# 前端（build 内含 lint:design + tsc --noEmit）
-cd frontend && npm run build
-
-# 前端九道门禁（组件层：陈列页 + 各纯逻辑脚本）
-cd frontend && npm run verify:all
-
-# 页面级门禁（真实页面 + ?mock 供数；a11y 20 组合 / 对比度 10 组合 / 键盘）
-cd frontend && npm run verify:pages
-```
-
-`verify:all` 的九步与覆盖范围（前三道是纯逻辑/构建，后六道需要浏览器）：
-
-| 步骤 | 断言 | 靶子 |
-|---|---|---|
-| `lint:design` | 设计 token 漂移：旧 utility、硬编码色值、任意值 | 49 文件扫描，白名单只剩 `wailsapi.ts` 一行 |
-| `tsc --noEmit` | 类型检查，`noUnusedLocals`/`noUnusedParameters` 已开 | 全部 TS |
-| `verify:theme` | token 换值、字体栈、瑞士直角、旧变量已清除、语义组合可读 | tokens.css |
-| `verify:wails` | 事件层：多路分发、退订隔离、`EventsOff` 语义、早到缓冲、异常隔离 | `lib/wails.ts`（探针页 = 陈列页） |
-| `verify:lib` | 时间码/字节/百分比/虚拟化边界 | `lib/format.ts`、`lib/virtualizer.ts` |
-| `verify:a11y` | axe 矩阵 1180/1366/1680 × light/dark | 陈列页（组件层） |
-| `verify:datatable` | 5000 行 DOM 数与长任务 | 陈列页的 5000 行演示表——**组件级门禁，故意不搬去真实页面**（真实页面没有这种数据量） |
-| `verify:contrast` | 所有可见文本 ≥4.5:1 | 陈列页 |
-| `verify:keyboard` | Tab 焦点环、Segmented 方向键、Modal 陷阱 + 焦点归还、破坏性确认初始焦点、reduced-motion 三断言 | 陈列页 |
-
-`verify:pages` 三组，全部跑在 `?mock` 供数的真实页面上：
-
-| 步骤 | 内容 |
-|---|---|
-| `verify:pages:a11y` | 5 个靶子（translate/subtitle/model/settings/引导页）× 1180,1680 × light,dark = 20 组合，门槛 critical=0 && serious=0 |
-| `verify:pages:contrast` | 同 5 个靶子 × 两主题；字幕页用 `--click-text=导入字幕` 先展开 48 条 cue 再测 |
-| `verify:pages:keyboard` | Settings 页（`--modal-text=立即清空 --confirm-text=立即清空 --min-stops=10`），组件不存在记 SKIP、全 SKIP 视为失败 |
-
-脚本改靶方式：都是位置参数给路径，`verify-a11y` 可给逗号分隔的多路径；`verify-contrast`
-支持 `--click-text=` 做一次导航后点击；`verify-keyboard` 支持 `--min-stops/--modal-text/--confirm-text`。
-键盘门禁的结果口径是 PASS/SKIP/FAIL 三态计数，SKIP 不掩盖 FAIL，也不允许"全跳过"当绿。
-
-已知环境约束，都已写进脚本，不是待办：
-
-- `go test -race` 不可用。`CGO_ENABLED=0` 是架构决策（ADR-001），所以竞态类修复只能靠确定性并发测试
-  加代码审阅。任何报告都不得声称 race detector 通过
-- `npx playwright install chromium` 本机不可达（`cdn.playwright.dev` 超时）。各 verify 脚本自己按
-  `channel: 'chrome'` → `msedge` → 自带 chromium 回退，不依赖下载浏览器。这段回退逻辑在每个脚本里各存一份，
-  没有抽公共 helper
-- Git Bash 里跑 node 脚本需要 `MSYS_NO_PATHCONV=1`，因为只有 `verify-a11y.mjs` 的位置参数
-  `/?primitives` 会被 MSYS 路径转换吃掉；npm scripts 走 cmd 则不需要
-- 两个门禁组的覆盖面不同：`verify:all` 是组件层（陈列页 + 纯逻辑），`verify:pages` 是页面层
-  （真实页面 + `?mock`）。页面层目前只覆盖 a11y/对比度/键盘三组；`verify:datatable` 的本质是
-  组件级性能门禁，留在陈列页（真实页面没有 5000 行数据）
-- 页面级 a11y 的剩余 moderate（不阻塞门禁，门槛是 critical/serious）：真实页面都有
-  `page-has-heading-one`（页面标题是 `<span>` 不是 `<h1>`），引导页另有 `landmark-one-main` 与
-  `region ×12`（向导浮层没有 `<main>` 包裹）
-
-## 目录结构
-
-```
-app/                      Go 后端（模块 indexvt）
-  main.go                 Wails 入口：单实例锁 → 日志 → 装配 → UI
-  app.go                  绑定层（前端唯一 API 面，65 个导出方法）
-  frontenddist/           前端 embed 源（构建产物，gitignored，由 scripts/build.mjs 同步）
-  internal/
-    orchestrator/         llama-server 生命周期、空闲卸载、热切换、状态机
-    modelmanager/         三模型注册表、下载（双源 + 续传 + 校验）、路径安全
-    translator/           提示词、SSE 流式、off-target 检测、首字节看门狗
-    subtitle/             SRT/ASS/VTT/LRC 解析与保真导出、翻译队列、编辑引擎（M4 五操作+删除插入+样式）
-    docpipeline/          长文档：token-budget 分块、翻译队列、术语注入、覆盖率度量
-    store/                SQLite（历史/配置/术语/模型登记）
-    envprobe/             GPU / llama-server / 残留进程探测
-    winproc/              Win32：互斥锁、job object、控制台、进程句柄
-    config/ paths/ csvsanitizer/
-frontend/                 React 前端
-  src/theme/              语义 token（light/dark · 瑞士值）+ 主题运行时 + 本地字体
-  src/lib/                wails 事件层 / 错误映射 / 格式化 / 虚拟化 / useDismissable /
-                          modes.ts（翻译模式模板）/ mockbackend.ts（dev 假后端，?mock）
-  src/components/ui/      23 个原语（Button…DataTable）
-  src/pages/              6 个页面（主翻译台/字幕工作台/文档翻译/模型中心/设置/引导页）+ _Primitives 陈列页
-  src/wailsapi.ts         RPC 薄封装（事件走 lib/wails，调用仍走这里）
-  src/vite-env.d.ts       import.meta.env 类型（Vite 客户端类型引用）
-  scripts/                门禁脚本（lint-design-tokens / verify-*）
-scripts/build.mjs         生产构建入口
-thirdparty/llama-server/  推理后端（gitignored，需自备）
-models/                   模型与数据库（gitignored）
-docs/                     设计与交付文档（见下）
-spark-output/             PRD 与动效规范等设计链产物
-```
-
-## 文档索引
-
-| 文档 | 作用 |
-|---|---|
-| `docs/03-GUI设计图/DESIGN.md` | 视觉契约 v2.1：token 实算值（含对 surface 与对自身 soft 两列对比度）、组件规格、a11y 契约、反模式与漂移防线。2026-10-06 已随瑞士重映射整表同步，§12 记 v2.0「素笺」→ v2.1 的差异。§6.2 断点与若干布局值如实标注为未实现 |
-| `docs/03-GUI设计图/legacy/` | v1.0 作废件（`设计系统规范.md` + `mockups.html`），2026-10-05 归档，只作历史参考 |
-| `docs/01-设计方案文档.md` · `02-执行细节说明.md` · `04-交付与验收方案.md` | M1 设计冻结记录。哪些条目已被取代、哪些功能仍未实现，见各文件开头的状态说明 |
-| `docs/superpowers/specs/2026-10-04-gui-redesign-and-defect-fixes-design.md` | 工程 spec：架构、B1–B32 契约变更（B32 属 Track B）、并发不变量、验证矩阵；§10 是已回答的未决问题 |
-| `docs/superpowers/plans/2026-10-04-sujian-track-a-backend-hardening.md` | Track A 实施计划（已完成） |
-| `docs/superpowers/plans/2026-10-04-sujian-track-b-frontend-foundation.md` | Track B 实施计划（已完成） |
-| `docs/superpowers/plans/2026-10-05-sujian-track-b-handover.md` | Track B 完成报告 + Track C 交接清单（23 原语导入面、迁移白名单规则、未接线后端能力） |
-| `spark-output/prd/sujian-gui-redesign.md` | 8 段式 PRD：10 个 Story × 64 条 Given/When/Then 验收 |
-| `spark-output/context/motion-plan.json` | 动效规范（Premium 人格，16 条 element_specs，reduced-motion 降级策略） |
-| `spark-output/dashboard.html` | 设计链面板，可由套件重新生成，不含独有信息 |
-
-## 隐私与安全
-
-- 全本地推理，零遥测：没有行为埋点，不接分析服务
-- 外网仅用于模型下载：仅 https、允许列表域、解析后 IP 直连以防 DNS rebinding（`download.go:88`）。
-  允许列表检查发生在 `CheckRedirect`，初始 URL 由代码拼接而非用户输入
-- 路径安全：来自前端的文件路径过归拢校验（必须在 `models/` 内 + `.gguf` 后缀），由
-  `modelmanager/manager.go:470,512` 在导入归位与删除两处执行。字幕的 `SubOpen`/`SubExport`
-  走系统对话框路径，不经此检查
-- CSV 导出做过公式注入中和：`=` `+` `-` `@` 开头的内容加前缀 `'`，不会被 Excel 当公式执行
-  （`csvsanitizer.go:9`）
-- `logs/llama-server.out.log` 默认不进「脱敏」zip，理由见「数据与日志位置」
-
-## 已知限制
-
-- 只做 Windows，不考虑跨平台
-- 配音模式（Homura）已有主翻译台入口（F-07，音节预算 UI）；但 `nailong`/`homura`
-  被激活后主翻译台仍用通用提示词驱动（模型中心有警告条如实说明），官方模板链路待后续里程碑
-- 模型中心的激活收口已放开：文件已登记进 store 即可「设为当前」（`ModelHub.tsx:200` 起），
-  不再写死只允许 `translate`；非 translate 模型激活后显示警告条。后端 `SetActiveModel`
-  本身没有守卫，绕过 UI 直接调用仍可设置
-- 设置页的「关闭程序时」是无 `onChange` 的单选展示（退出即释放是唯一实现）；主题与字号已可改
-  （Track C 接通了 `applyTheme`/`applyFontSize` + 配置持久化）
-- 状态栏的「离线可用」徽标是写死的静态元素（`StatusBar.tsx:93`），不来自后端状态。Go 侧
-  `GetSystemStatus` 的 `Offline` 字段恒为 `false`（`app.go:646`）且前端无人消费。也就是说断网探测并未实现，
-  徽标只是把「模型就绪后不需要网络」这句设计事实常驻显示
-- 事件订阅已全部走 `lib/wails`（单点订阅多路分发）；`wailsapi.ts` 现在只剩 RPC 薄封装。
-  它是 lint 白名单里最后一行（因 `declare global` 的 any 用法保留豁免）
-- 术语本只读可选、不能建/改/删：约束抽屉用 `ListGlossaries` 拉列表，
-  `SaveGlossary`/`DeleteGlossary`/`ExportGlossaryCSV` 已封装但没有 UI；`CurrentModelPath()` 恒返回空串
-- 页面级门禁的已知缺口：只覆盖 a11y/对比度/键盘三组（`verify:pages`），datatable 留在组件层；
-  引导页有 3 类 moderate 未修（`page-has-heading-one`、`landmark-one-main`、`region ×12`），
-  真实页面各有 1 条 `page-has-heading-one` —— 都不阻塞门禁（门槛是 critical/serious），但属待办
-- 内嵌字体三份（均 SIL OFL 1.1）：Archivo latin 子集 18.3KB、Noto Sans SC CJK 子集 1.72MB、
-  JetBrains Mono latin 子集 30.7KB。Archivo 与 Noto 的许可证文本随仓库分发
-  （`frontend/src/assets/fonts/OFL-*.txt`），**JetBrains Mono 的许可证副本仍缺，发布前需补**。
-  **CJK 子集不覆盖生僻字/繁体/韩文**——这些字按字形回退系统雅黑，同段文本可能出现字形混排
-  （口径与体积取舍见 `DESIGN.md` §3.1）
-- 语言清单实际 152 条（22 核心 + 130 扩展，`translator/languages.go:16-18`），代码注释与 UI 文案仍写「150 语言」
-- **64K 档真机未验证**：模型 GGUF 标称 262144 positions（理论支持），但 `-c 65536` 的启动耗时、
-  显存峰值与失败时的 orchestrator 退避从未实测；ctx 自定义刚落地时建议首次用超 32K 档位时手工观察一次。
-  显存估算是线性模型（偏差 ±20%，见 `EstimateCtxVRAM` 的 `basis`），不是测量值
-- `go test -race` 不可用；Win32 进程与显存行为只能真机手工验收
-
-已知限制的完整清单（发布阻塞 / 环境依赖 / 功能限制 / a11y 缺口 / 性能未定项 /
-工程约束，逐条含处置建议）见 `docs/已知限制清单-2026-10-09.md`。
+Maintainer resources: [release guide](docs/RELEASING.zh-CN.md) · [file cleanup review](docs/CLEANUP-2026-10-18.md).

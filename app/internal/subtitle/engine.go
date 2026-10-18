@@ -6,6 +6,7 @@ package subtitle
 import (
 	"context"
 	"fmt"
+	"indexvt/internal/atomicfile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,7 +68,7 @@ type StyleDef struct {
 	FontSize   int     `json:"fontSize"`
 	PrimaryRGB string  `json:"primaryRGB"` // #RRGGBB（ASS &HAABBGGRR 转换）
 	OutlineRGB string  `json:"outlineRGB"` // #RRGGBB
-	Outline    float64 `json:"outline"`   // 描边宽度
+	Outline    float64 `json:"outline"`    // 描边宽度
 	Bold       bool    `json:"bold"`
 	Alignment  int     `json:"alignment"` // ASS numpad 1-9（底部居中=2）
 	MarginV    int     `json:"marginV"`
@@ -76,6 +77,7 @@ type StyleDef struct {
 
 // SubtitleDoc 打开的字幕文档。
 type SubtitleDoc struct {
+	Revision    uint64     `json:"revision"`
 	ID          string     `json:"id"`
 	Path        string     `json:"path"`
 	Format      Format     `json:"format"`
@@ -92,6 +94,9 @@ type SubtitleDoc struct {
 	// QueueActive 该文档是否有进行中的翻译队列。不入库；只在 GetDoc 快照时按
 	// queueCancel 表计算——前端据此禁用暂停/继续/取消，而不是点了才弹「无进行中队列」。
 	QueueActive bool `json:"queueActive,omitempty"`
+	QueuePaused bool `json:"queuePaused"`
+	CanUndo     bool `json:"canUndo"`
+	CanRedo     bool `json:"canRedo"`
 }
 
 // BilingualMode 双语模式（01 文档 §5.4 三模式）。
@@ -113,17 +118,31 @@ type ExportOptions struct {
 
 // QueueOptions 队列选项。
 type QueueOptions struct {
-	TargetLang  string        `json:"targetLang"`
-	GlossaryID  int64         `json:"glossaryId,omitempty"` // M3 启用术语
-	Bilingual   BilingualMode `json:"bilingual"`
+	TargetLang string        `json:"targetLang"`
+	GlossaryID int64         `json:"glossaryId,omitempty"` // M3 启用术语
+	Bilingual  BilingualMode `json:"bilingual"`
 	// Full 整卷重翻：done/failed 一并重跑——目标语言选错后「全部翻译」必须覆盖全片，
 	// 否则已翻条目保留旧语言译文。仅 SubTranslate 入口传真；RetryFailed/RetryCues
 	// 内部强制清零（重试语义只覆盖各自目标集）。
-	Full bool `json:"full,omitempty"`
+	Full    bool           `json:"full,omitempty"`
+	Terms   []GlossaryTerm `json:"-"` // app层在启动队列前固定本轮词条
+	targets map[int]bool   // nil=常规 pending/failed；重试接口使用显式目标集
+}
+
+type GlossaryTerm struct {
+	Term        string
+	Translation string
+}
+type glossaryContextKey struct{}
+
+func GlossaryFromContext(ctx context.Context) []GlossaryTerm {
+	terms, _ := ctx.Value(glossaryContextKey{}).([]GlossaryTerm)
+	return terms
 }
 
 // CueProgress 队列进度事件（100ms 合并后推送）。
 type CueProgress struct {
+	Revision   uint64   `json:"revision"`
 	DocID      string   `json:"docId"`
 	CueIndex   int      `json:"cueIndex"`
 	State      CueState `json:"state"`
@@ -141,12 +160,15 @@ type TranslateCueFn func(ctx context.Context, text, sourceLang, targetLang strin
 
 // Engine 字幕引擎。
 type Engine struct {
-	mu       sync.Mutex
-	docs     map[string]*SubtitleDoc
-	seq      int
-	translate TranslateCueFn
+	mu          sync.Mutex
+	docs        map[string]*SubtitleDoc
+	seq         int
+	translate   TranslateCueFn
 	queueCancel map[string]*queueCtl
-	order    []string // LRU 最近使用顺序（末尾最新），仅由 touchLocked 在持 e.mu 时维护
+	order       []string // LRU 最近使用顺序（末尾最新），仅由 touchLocked 在持 e.mu 时维护
+	undo        map[string][]*SubtitleDoc
+	redo        map[string][]*SubtitleDoc
+	editBefore  map[string]*SubtitleDoc
 }
 
 // NewEngine 创建引擎。translateCue 为单条翻译桥接（可 nil，测试时注入假实现）。
@@ -155,7 +177,14 @@ func NewEngine(translateCue TranslateCueFn) *Engine {
 		docs:        make(map[string]*SubtitleDoc),
 		translate:   translateCue,
 		queueCancel: make(map[string]*queueCtl),
+		undo:        make(map[string][]*SubtitleDoc), redo: make(map[string][]*SubtitleDoc), editBefore: make(map[string]*SubtitleDoc),
 	}
+}
+
+func (e *Engine) HasActiveQueue() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.queueCancel) > 0
 }
 
 // ---------- Open ----------
@@ -232,6 +261,9 @@ func (e *Engine) GetDoc(id string) (*SubtitleDoc, error) {
 	e.touchLocked(id)
 	out := e.snapshotLocked(d)
 	_, out.QueueActive = e.queueCancel[id]
+	if ctl := e.queueCancel[id]; ctl != nil {
+		out.QueuePaused = ctl.isPaused
+	}
 	return out, nil
 }
 
@@ -242,6 +274,8 @@ func (e *Engine) snapshotLocked(doc *SubtitleDoc) *SubtitleDoc {
 	cues := make([]Cue, len(doc.Cues))
 	copy(cues, doc.Cues)
 	out := *doc
+	out.CanUndo = len(e.undo[doc.ID]) > 0
+	out.CanRedo = len(e.redo[doc.ID]) > 0
 	out.Cues = cues
 	if len(doc.Styles) > 0 {
 		out.Styles = append([]StyleDef(nil), doc.Styles...)
@@ -266,6 +300,9 @@ func (e *Engine) touchLocked(id string) {
 			ctl.cancel() // 淘汰对象仍在跑队列：先取消再删除，不得把文档从活 goroutine 底下抽走
 		}
 		delete(e.docs, oldest)
+		delete(e.undo, oldest)
+		delete(e.redo, oldest)
+		delete(e.editBefore, oldest)
 	}
 }
 
@@ -327,7 +364,10 @@ func (e *Engine) Export(docID string, opt ExportOptions) error {
 	if opt.OutPath == "" {
 		return fmt.Errorf("未指定输出路径")
 	}
-	return os.WriteFile(opt.OutPath, data, 0o644)
+	if err := atomicfile.ProtectSource(snap.Path, opt.OutPath); err != nil {
+		return err
+	}
+	return atomicfile.Write(opt.OutPath, data)
 }
 
 // serializeBytes 内存导出（测试用）。
@@ -386,7 +426,10 @@ func (e *Engine) ExportOriginal(docID string, opt ExportOptions) error {
 			return err
 		}
 	}
-	return os.WriteFile(opt.OutPath, data, 0o644)
+	if err := atomicfile.ProtectSource(snap.Path, opt.OutPath); err != nil {
+		return err
+	}
+	return atomicfile.Write(opt.OutPath, data)
 }
 
 // serializeWithText 指定使用原文/译文的序列化。

@@ -4,14 +4,17 @@
 // 生命周期与字幕队列同构：取消保留已产出，续跑只补 pending/failed。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileText, Play, Upload } from 'lucide-react'
-import { Badge, Button, EmptyState, Progress, Segmented } from '../components/ui/index'
+import { Badge, Button, EmptyState, Progress, Segmented, Modal } from '../components/ui/index'
 import { toast } from '../stores/toastStore'
 import { useAppStore } from '../stores/appStore'
 import { on, EV } from '../lib/wails'
 import {
   apiDocPick,
+  apiNoteWorkspace,
   apiDocTranslate,
   apiDocResume,
+  apiDocRestart,
+  apiRevealFile,
   apiDocCancel,
   apiDocGetDoc,
   apiDocExport,
@@ -31,7 +34,7 @@ interface DocSnap {
   direction: string
   chunks: Chunk[]
   charsTotal: number
-  coverage?: { term: string; translation: string; sourceChunks: number; hitChunks: number }[]
+  coverage?: { term: string; translation: string; sourceChunks: number; hitChunks: number; sourceOccurrences?: number; targetOccurrences?: number; missingChunks?: number[] }[]
   queueActive?: boolean
 }
 
@@ -66,7 +69,7 @@ const STATE_TONE: Record<string, 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'
 const errToast = (e: unknown) =>
   toast.push({ tone: 'error', message: String((e as { message?: string })?.message ?? e) })
 
-export function DocTranslatePage() {
+export function DocTranslatePage({ active = true }: { active?: boolean }) {
   const refreshStatus = useAppStore((s) => s.refreshStatus)
   const [pending, setPending] = useState<{ path: string; chars: number } | null>(null)
   const [dirLabel, setDirLabel] = useState('中→英')
@@ -74,124 +77,133 @@ export function DocTranslatePage() {
   const [glossaryId, setGlossaryId] = useState(0)
   const [doc, setDoc] = useState<DocSnap | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
+  const [phase, setPhase] = useState<'idle' | 'starting' | 'running' | 'stopping'>('idle')
+  const [confirmRestart, setConfirmRestart] = useState(false)
+  const [exportKind, setExportKind] = useState<'translation' | 'bilingual' | null>(null)
+  const generation = useRef(0)
+  const readVersion = useRef(0)
+  const submitting = useRef(false)
   const [done, setDone] = useState<{ canceled?: boolean; error?: string } | null>(null)
   // 当前文档 id：事件按 id 过滤。旧文档队列仍在跑时（未取消就导入新文档），
   // 它的 doc:progress / doc:done 不能覆盖当前文档的进度、更不能把显示中的
   // 文档快照换成旧文档的（refreshDoc(r.docId) 曾有此问题）。
   const docIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    docIdRef.current = doc?.id ?? null
-  }, [doc?.id])
-
-  useEffect(() => {
-    apiListGlossaries().then((gs) => setGlossaries(gs ?? [])).catch(() => {})
-  }, [])
-
-  const refreshDoc = useCallback((id: string) => {
-    apiDocGetDoc(id).then((d) => d && setDoc(d)).catch(() => {})
+  const refreshDoc = useCallback(async (id: string) => {
+    const gen = generation.current
+    const version = ++readVersion.current
+    const fresh = await apiDocGetDoc(id)
+    if (gen !== generation.current || version !== readVersion.current || docIdRef.current !== id || fresh?.id !== id) return
+    setDoc(fresh)
+    if (!fresh.queueActive) setPhase('idle')
   }, [])
 
   useEffect(() => {
-    // 后端 DocProgress / DocDone 载荷恒带 docId（pipeline.go / docpipeline.go），
-    // 严格匹配当前文档：不匹配（或尚无当前文档）一律忽略。
-    const offProgress = on(EV.DOC_PROGRESS, (p) => {
+    if (active) apiListGlossaries().then(gs => setGlossaries(gs ?? [])).catch(errToast)
+  }, [active])
+
+  useEffect(() => {
+    const offProgress = on(EV.DOC_PROGRESS, p => {
       const prog = p as Progress
-      if (prog.docId !== docIdRef.current) return // 旧文档的事件
-      setProgress(prog)
+      if (prog.docId && prog.docId === docIdRef.current) setProgress(prog)
     })
-    const offDone = on(EV.DOC_DONE, (d) => {
-      const r = d as { docId: string; error?: string; canceled?: boolean }
-      if (r.docId !== docIdRef.current) return // 旧文档的终态
+    const offDone = on(EV.DOC_DONE, payload => {
+      const result = payload as { docId: string; error?: string; canceled?: boolean }
+      if (!result.docId || result.docId !== docIdRef.current) return
       setProgress(null)
-      setDone({ canceled: r.canceled, error: r.error })
-      refreshDoc(r.docId)
-      refreshStatus()
-      if (r.canceled) toast.push({ tone: 'info', message: '长文档翻译已取消，已产出内容保留' })
+      setDone(result)
+      setPhase('idle')
+      void refreshDoc(result.docId).catch(errToast)
+      void refreshStatus()
     })
-    return () => {
-      offProgress()
-      offDone()
-    }
+    return () => { offProgress(); offDone() }
   }, [refreshDoc, refreshStatus])
 
+  useEffect(() => {
+    if (!doc || (phase === 'idle' && !doc.queueActive)) return
+    const id = doc.id
+    const timer = setInterval(() => { void refreshDoc(id).catch(() => {}) }, 1000)
+    return () => clearInterval(timer)
+  }, [doc?.id, doc?.queueActive, phase, refreshDoc])
+
   const doPick = async () => {
+    if (submitting.current || phase !== 'idle' || doc?.queueActive) return
+    const gen = ++generation.current
     try {
       const res = await apiDocPick()
-      if (!res) return
-      if (res.unsupported) {
-        toast.push({ tone: 'error', message: '文件内容为空或无法解码' })
-        return
-      }
-      if (res.tooLong) {
-        toast.push({ tone: 'error', message: `文档 ${res.chars} 字超出当前上限 50000 字` })
-        return
-      }
+      if (gen !== generation.current || !res) return
+      if (res.unsupported || res.tooLong) { errToast(res.tooLong ? '文档超出50000字上限' : '文件为空或无法解码'); return }
       setPending({ path: res.path, chars: res.chars })
-      docIdRef.current = null // 旧文档的事件从此刻起一律忽略
-      setDoc(null)
-      setDone(null)
-      setProgress(null)
-    } catch (e) {
-      errToast(e)
-    }
+      docIdRef.current = null
+      ++readVersion.current
+      setDoc(null); setDone(null); setProgress(null)
+    } catch (e) { if (gen === generation.current) errToast(e) }
   }
 
   const doStart = async () => {
-    if (!pending) return
+    if (!pending || submitting.current) return
+    submitting.current = true
+    const gen = generation.current
+    setPhase('starting'); setDone(null); setProgress(null)
     try {
-      const id = await apiDocTranslate({
-        path: pending.path,
-        direction: DIRECTIONS[dirLabel],
-        glossaryId: glossaryId || undefined,
-      })
-      docIdRef.current = id // 拿到 id 立即登记：早到的进度/终态事件不被误丢
-      setDoc(await apiDocGetDoc(id))
-      refreshStatus()
-    } catch (e) {
-      errToast(e)
-    }
+      const id = await apiDocTranslate({ path: pending.path, direction: DIRECTIONS[dirLabel], glossaryId: glossaryId || undefined })
+      if (gen !== generation.current) return
+      docIdRef.current = id
+      setPending(null)
+      setPhase('running')
+      await refreshDoc(id)
+      void refreshStatus()
+    } catch (e) { if (gen === generation.current) { setPhase('idle'); errToast(e) } }
+    finally { submitting.current = false }
   }
 
-  const doResume = async () => {
-    if (!doc) return
+  const run = async (restart = false) => {
+    const id = docIdRef.current
+    if (!id || submitting.current) return
+    submitting.current = true
+    setPhase('starting'); setDone(null); setProgress(null)
     try {
-      await apiDocResume(doc.id)
-      refreshDoc(doc.id)
-      refreshStatus()
-    } catch (e) {
-      errToast(e)
-    }
+      if (restart) await apiDocRestart(id)
+      else await apiDocResume(id)
+      if (docIdRef.current !== id) return
+      setPhase('running')
+      await refreshDoc(id)
+      void refreshStatus()
+    } catch (e) { if (docIdRef.current === id) { setPhase('idle'); errToast(e) } }
+    finally { submitting.current = false }
   }
 
-  const doCancel = () => {
-    if (!doc) return
-    apiDocCancel(doc.id).catch(errToast)
+  const doCancel = async () => {
+    if (!doc || phase === 'stopping') return
+    const id = doc.id
+    setPhase('stopping')
+    try { await apiDocCancel(id); await refreshDoc(id) }
+    catch (e) { if (docIdRef.current === id) { setPhase('idle'); errToast(e) } }
   }
 
   const doExport = async (kind: 'translation' | 'bilingual') => {
     if (!doc) return
+    setExportKind(null)
     try {
-      const saved = await apiDocExport(doc.id, kind)
-      // 空串 = 用户取消了保存对话框，不算导出成功（后端 DocExport 契约）
-      if (saved) toast.push({ tone: 'ok', message: kind === 'bilingual' ? '双语对照已导出' : '译文已导出' })
-    } catch (e) {
-      errToast(e)
-    }
+      const saved = await apiDocExport(doc.id, doc.chunks.every(c => c.state === 'done') ? kind : `${kind}-partial`)
+      if (saved) toast.push({ tone: 'ok', message: `已导出：${saved}`, action: { label: '打开所在文件夹', run: () => { apiRevealFile(saved).catch(errToast) } } })
+    } catch (e) { errToast(e) }
   }
 
   const charsDone = progress?.charsDone ?? (doc?.chunks ?? []).filter((c) => c.state === 'done')
     .reduce((n, c) => n + c.text.length, 0)
   const charsTotal = progress?.charsTotal ?? doc?.charsTotal ?? 0
   const pct = charsTotal > 0 ? Math.round((charsDone / charsTotal) * 100) : 0
-  const queueActive = doc?.queueActive ?? false
+  const queueActive = !!doc?.queueActive || phase !== 'idle'
   const unfinished = (doc?.chunks ?? []).some((c) => c.state !== 'done')
   const allDone = doc && doc.chunks.length > 0 && !unfinished
+  useEffect(() => { apiNoteWorkspace('doc', !!doc?.chunks.some(c => c.translated)).catch(() => {}) }, [!!doc?.chunks.some(c => c.translated)])
+  useEffect(() => { useAppStore.setState(s => ({ pageTasks: { ...s.pageTasks, doc: queueActive } })) }, [queueActive])
 
   return (
     <div className="flex flex-col gap-3.5 h-full min-h-0 screen-in">
       {/* 工具栏 */}
       <div className="flex items-center gap-2.5 flex-wrap">
-        <Button onClick={doPick}>
+        <Button disabled={queueActive} onClick={doPick}>
           <Upload size={14} /> 导入文档
         </Button>
         {(pending || doc) && (
@@ -206,12 +218,14 @@ export function DocTranslatePage() {
           value={dirLabel}
           aria-label="翻译方向"
           onChange={setDirLabel}
+          disabled={queueActive || !!doc}
         />
         <select
           value={glossaryId}
+          disabled={queueActive || !!doc}
           onChange={(e) => setGlossaryId(Number(e.target.value))}
           aria-label="术语本"
-          title="固定译名表：入表词条全片逐字一致（M5 §7.11 实证机制）"
+          title="词条用于模型提示；命中块数不代表全文逐次一致"
           className="bg-sunken border border-line text-ink1 px-2.5 py-1.5 text-caption"
         >
           <option value={0}>不用术语本</option>
@@ -222,24 +236,24 @@ export function DocTranslatePage() {
           ))}
         </select>
         {pending && (
-          <Button kind="primary" onClick={doStart}>
-            <Play size={14} /> 开始翻译
+          <Button kind="primary" disabled={queueActive} onClick={doStart}>
+            <Play size={14} /> {phase === 'starting' ? '正在开始…' : '开始翻译'}
           </Button>
         )}
         {doc && !pending && (
-          <Button kind="primary" disabled={queueActive} onClick={doResume}>
-            <Play size={14} /> {unfinished ? '继续翻译' : '重新翻译'}
+          <Button kind="primary" disabled={queueActive} onClick={() => unfinished ? run() : setConfirmRestart(true)}>
+            <Play size={14} /> {queueActive ? (phase === 'stopping' ? '正在停止…' : '翻译中…') : unfinished ? '继续翻译' : '重新翻译'}
           </Button>
         )}
         {doc && (
-          <Button disabled={!queueActive} onClick={doCancel}>
+          <Button disabled={!doc.queueActive || phase === 'stopping'} onClick={doCancel}>
             取消
           </Button>
         )}
-        {allDone && (
+        {doc && !queueActive && doc.chunks.some(c => c.state === 'done') && (
           <>
-            <Button onClick={() => doExport('translation')}>导出译文</Button>
-            <Button onClick={() => doExport('bilingual')}>导出双语对照</Button>
+            <Button onClick={() => allDone ? doExport('translation') : setExportKind('translation')}>导出译文</Button>
+            <Button onClick={() => allDone ? doExport('bilingual') : setExportKind('bilingual')}>导出双语对照</Button>
           </>
         )}
       </div>
@@ -263,7 +277,7 @@ export function DocTranslatePage() {
           <EmptyState
             icon={<FileText size={48} strokeWidth={1.5} />}
             title="导入长文档开始翻译"
-            body="txt / md · 编码自动识别 · 整卷分块翻译 · 术语全片一致 · 导出译文与双语对照"
+            body="txt / md · 编码自动识别 · 整卷分块翻译 · 术语提示约束 · 导出译文与双语对照"
             action={
               <Button kind="primary" onClick={doPick}>
                 <Upload size={14} /> 导入文档
@@ -276,16 +290,20 @@ export function DocTranslatePage() {
           {/* 覆盖率（完成后） */}
           {allDone && doc.coverage && doc.coverage.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-micro uppercase tracking-caps text-ink3">术语一致性</span>
+              <span className="text-micro uppercase tracking-caps text-ink3">规定译名命中块</span>
               {doc.coverage.map((c) => (
+                <span key={c.term} className="inline-flex gap-2 items-center">
                 <Badge
                   key={c.term}
                   tone={c.hitChunks === c.sourceChunks ? 'ok' : 'warn'}
                   dot
-                  title={c.hitChunks === c.sourceChunks ? '全片一致' : '存在未按固定译名命中的块，人工检查'}
+                  title={c.hitChunks === c.sourceChunks ? '所有含词条的块都出现了规定译名；仍需检查每次出现' : '存在未按固定译名命中的块，人工检查'}
                 >
                   {c.term}→{c.translation}：<span className="num">{c.hitChunks}/{c.sourceChunks}</span>
                 </Badge>
+                {c.missingChunks?.map(index => <Button key={index} size="sm" onClick={() => document.getElementById(`doc-${doc.id}-${index}`)?.scrollIntoView({ block: 'center' })}>检查块{index}</Button>)}
+                <span className="text-caption text-ink2">字面出现：{c.sourceOccurrences ?? '—'} / {c.targetOccurrences ?? '—'}（原/译，仅供检查）</span>
+                </span>
               ))}
             </div>
           )}
@@ -301,10 +319,10 @@ export function DocTranslatePage() {
               </div>
               {doc.chunks.map((c) => (
                 <div key={c.index} className="contents">
-                  <div className="px-4 py-3 border-b border-line text-caption text-ink2 leading-relaxed whitespace-pre-wrap break-words">
+                  <div id={`doc-${doc.id}-${c.index}`} className="select-text cursor-text px-4 py-3 border-b border-line text-read text-ink2 leading-relaxed whitespace-pre-wrap break-words">
                     {c.text}
                   </div>
-                  <div className="px-4 py-3 border-b border-l border-line text-caption text-ink1 leading-relaxed whitespace-pre-wrap break-words">
+                  <div role="region" aria-label="译文段落" className="select-text cursor-text px-4 py-3 border-b border-l border-line text-read text-ink1 leading-relaxed whitespace-pre-wrap break-words">
                     {c.state === 'done' ? (
                       c.translated
                     ) : (
@@ -319,6 +337,13 @@ export function DocTranslatePage() {
           </div>
         </div>
       )}
+      {doc && <p className="text-caption text-ink2">继续使用本任务原方向与术语；更改参数请导入新任务。会话会在切页后保留，关闭前请导出。</p>}
+      <Modal open={active && confirmRestart} onClose={() => setConfirmRestart(false)} title="重新翻译全部内容？" footer={<><Button onClick={() => setConfirmRestart(false)} data-modal-initial="cancel">取消</Button><Button kind="primary" onClick={() => { setConfirmRestart(false); void run(true) }}>确认重新翻译</Button></>}>
+        本任务全部译文将重新生成。方向和术语沿用本任务配置；当前译文请先导出。
+      </Modal>
+      <Modal open={active && exportKind !== null} onClose={() => setExportKind(null)} title="导出部分结果？" footer={<><Button onClick={() => setExportKind(null)} data-modal-initial="cancel">取消</Button><Button onClick={() => exportKind && doExport(exportKind)}>导出部分结果</Button></>}>
+        文档尚未全部完成；未完成块将按导出文件中的标记保留，请勿作为完成稿使用。
+      </Modal>
     </div>
   )
 }
