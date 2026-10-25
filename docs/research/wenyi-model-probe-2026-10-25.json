@@ -1,0 +1,304 @@
+{
+  "created_at_utc": "2026-10-25T05:48:28.357582+00:00",
+  "scope": "Synthetic compatibility probes, not an end-to-end Wenyi run or quality benchmark",
+  "engine": "llama.cpp b11406 / 8216c8462",
+  "gpu": "NVIDIA GeForce RTX 3050 Laptop GPU, 4096 MiB, 591.86",
+  "settings": {
+    "context_tokens": 8192,
+    "gpu_layers": 99,
+    "flash_attention": "on",
+    "parallel_slots": 1,
+    "temperature": 0,
+    "thinking": false
+  },
+  "plain_source": "雨停的时候，林舟已经走到了旧车站。站台上的钟慢了十分钟，候车室里却没有一个旅客。\n\n他从口袋里取出一张折了四次的地图，仔细寻找河对岸的小镇。地图上没有桥，只有一条用蓝色墨水画出的虚线。管理员告诉他，冬天来临之前，最后一班渡船每天傍晚六点离岸。\n\n“如果今天赶不上，就在这里住一晚。”管理员一边说，一边把窗户推开。凉风带进了潮湿的泥土气味。林舟想起妹妹写在信末的那句话：不用着急，我们等的是你，不是那只箱子。\n\n他把地图收好，将沉重的木箱暂时寄存在行李房。收据上的号码是二十七，与信封背面的数字相同。这个巧合让他停了片刻，但他最终没有回头询问，只沿着站前的小路向河边走去。\n\n太阳落下之前，他终于看见了渡船。船夫没有催促，只抬手指了指船头空着的位置。远处的小镇亮起第一盏灯，河面上的风也渐渐平静下来。",
+  "segment_sources": [
+    "雨停的时候，林舟已经走到了旧车站。",
+    "站台上的钟慢了十分钟。",
+    "管理员说：最后一班渡船傍晚六点离岸。"
+  ],
+  "models": [
+    {
+      "model": "Index-Translate-2B.Q4_K_M.gguf",
+      "startup_seconds": 1.7470429000095464,
+      "cases": [
+        {
+          "id": "plain_translation_1",
+          "wall_seconds": 3.4892276999889873,
+          "text": "When the rain stopped, Lin Zhou had already reached the old station. The clock on the platform was ten minutes slow, yet there wasn't a single passenger in the waiting room.\n\nHe took a map folded four times from his pocket and carefully searched for the small town on the other side of the river. There was no bridge on the map, only a dashed line drawn in blue ink. The attendant told him that before winter arrived, the last ferry would set sail at six o'clock every evening.\n\n\"If I can't make it today, I'll have to stay here for the night,\" the attendant said, pushing open the window. A cool breeze brought in the scent of damp earth. Lin Zhou remembered his sister's words at the end of her letter: \"Don't worry, we're waiting for you, not that box.\"\n\nHe put the map away and temporarily stored the heavy wooden box in the luggage room. The number on the receipt was twenty-seven, the same as the number on the back of the envelope. This coincidence made him pause for a moment, but he ultimately didn't turn back to ask. Instead, he walked along the small path in front of the station toward the river.\n\nBefore the sun set, he finally saw the ferry. The boatman didn't rush him; he just pointed to an empty spot at the bow. The first light of the distant town lit up, and the wind on the river gradually calmed down.",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 297,
+            "prompt_tokens": 249,
+            "total_tokens": 546,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 249,
+            "prompt_ms": 108.024,
+            "prompt_per_token_ms": 0.43383132530120483,
+            "prompt_per_second": 2305.0433237058432,
+            "predicted_n": 297,
+            "predicted_ms": 3351.934,
+            "predicted_per_token_ms": 11.324101351351352,
+            "predicted_per_second": 88.30722800627936
+          },
+          "end_to_end_output_tokens_per_second": 85.11912249261846
+        },
+        {
+          "id": "plain_translation_2",
+          "wall_seconds": 3.471877100004349,
+          "text": "When the rain stopped, Lin Zhou had already reached the old station. The clock on the platform was ten minutes slow, yet there wasn't a single passenger in the waiting room.\n\nHe took a map folded four times from his pocket and carefully searched for the small town on the other side of the river. There was no bridge on the map, only a dashed line drawn in blue ink. The attendant told him that before winter arrived, the last ferry would set sail at six o'clock every evening.\n\n\"If I can't make it today, I'll have to stay here for the night,\" the attendant said, pushing open the window. A cool breeze brought in the scent of damp earth. Lin Zhou remembered his sister's words at the end of her letter: \"Don't worry, we're waiting for you, not that box.\"\n\nHe put the map away and temporarily stored the heavy wooden box in the luggage room. The number on the receipt was twenty-seven, the same as the number on the back of the envelope. This coincidence made him pause for a moment, but he ultimately didn't turn back to ask. Instead, he walked along the small path in front of the station toward the river.\n\nBefore the sun set, he finally saw the ferry. The boatman didn't rush him; he just pointed to an empty spot at the bow. The first light of the distant town lit up, and the wind on the river gradually calmed down.",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 297,
+            "prompt_tokens": 249,
+            "total_tokens": 546,
+            "prompt_tokens_details": {
+              "cached_tokens": 245
+            }
+          },
+          "timings": {
+            "cache_n": 245,
+            "prompt_n": 4,
+            "prompt_ms": 31.995,
+            "prompt_per_token_ms": 7.99875,
+            "prompt_per_second": 125.01953430223472,
+            "predicted_n": 297,
+            "predicted_ms": 3394.511,
+            "predicted_per_token_ms": 11.467942567567567,
+            "predicted_per_second": 87.19959958886568
+          },
+          "end_to_end_output_tokens_per_second": 85.5445027128489
+        },
+        {
+          "id": "plain_translation_3",
+          "wall_seconds": 3.441509699972812,
+          "text": "When the rain stopped, Lin Zhou had already reached the old station. The clock on the platform was ten minutes slow, yet there wasn't a single passenger in the waiting room.\n\nHe took a map folded four times from his pocket and carefully searched for the small town on the other side of the river. There was no bridge on the map, only a dashed line drawn in blue ink. The attendant told him that before winter arrived, the last ferry would set sail at six o'clock every evening.\n\n\"If I can't make it today, I'll have to stay here for the night,\" the attendant said, pushing open the window. A cool breeze brought in the scent of damp earth. Lin Zhou remembered his sister's words at the end of her letter: \"Don't worry, we're waiting for you, not that box.\"\n\nHe put the map away and temporarily stored the heavy wooden box in the luggage room. The number on the receipt was twenty-seven, the same as the number on the back of the envelope. This coincidence made him pause for a moment, but he ultimately didn't turn back to ask. Instead, he walked along the small path in front of the station toward the river.\n\nBefore the sun set, he finally saw the ferry. The boatman didn't rush him; he just pointed to an empty spot at the bow. The first light of the distant town lit up, and the wind on the river gradually calmed down.",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 297,
+            "prompt_tokens": 249,
+            "total_tokens": 546,
+            "prompt_tokens_details": {
+              "cached_tokens": 245
+            }
+          },
+          "timings": {
+            "cache_n": 245,
+            "prompt_n": 4,
+            "prompt_ms": 33.169,
+            "prompt_per_token_ms": 8.29225,
+            "prompt_per_second": 120.59453103801744,
+            "predicted_n": 297,
+            "predicted_ms": 3403.059,
+            "predicted_per_token_ms": 11.496820945945947,
+            "predicted_per_second": 86.98056660198957
+          },
+          "end_to_end_output_tokens_per_second": 86.2993354347792
+        },
+        {
+          "id": "representative_segment_json",
+          "wall_seconds": 0.6912277999799699,
+          "text": "{\"translations\": [\"When the rain stopped, Lin Zhou had already reached the old station.\", \"The clock on the platform was ten minutes slow.\", \"The attendant said: The last ferry will depart at six in the evening.\"]}",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 47,
+            "prompt_tokens": 99,
+            "total_tokens": 146,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 99,
+            "prompt_ms": 79.131,
+            "prompt_per_token_ms": 0.7993030303030303,
+            "prompt_per_second": 1251.0899647420101,
+            "predicted_n": 47,
+            "predicted_ms": 599.205,
+            "predicted_per_token_ms": 13.026195652173914,
+            "predicted_per_second": 76.76838477649552
+          },
+          "valid_json": true,
+          "expected_schema": true,
+          "end_to_end_output_tokens_per_second": 67.99495043654487
+        },
+        {
+          "id": "representative_style_analysis_json",
+          "wall_seconds": 3.745062700007111,
+          "text": "{\n  \"style_guide\": \"The narrative employs a contemplative and atmospheric tone, with vivid descriptions of the setting and subtle emotional undertones. The prose is lyrical yet restrained, focusing on sensory details and the passage of time.\",\n  \"characters\": [\"林舟\", \"管理员\", \"妹妹\"],\n  \"glossary\": [\n    {\n      \"source\": \"渡船\",\n      \"target\": \"ferry\"\n    },\n    {\n      \"source\": \"虚线\",\n      \"target\": \"dashed line\"\n    },\n    {\n      \"source\": \"行李箱\",\n      \"target\": \"suitcase\"\n    },\n    {\n      \"source\": \"信封\",\n      \"target\": \"envelope\"\n    },\n    {\n      \"source\": \"河对岸\",\n      \"target\": \"opposite bank\"\n    },\n    {\n      \"source\": \"管理员\",\n      \"target\": \"administrator\"\n    },\n    {\n      \"source\": \"小镇\",\n      \"target\": \"small town\"\n    },\n    {\n      \"source\": \"风\",\n      \"target\": \"wind\"\n    },\n    {\n      \"source\": \"夜晚\",\n      \"target\": \"night\"\n    },\n    {\n      \"source\": \"黎明\",\n      \"target\": \"dawn\"\n    }\n  ]\n}",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 311,
+            "prompt_tokens": 293,
+            "total_tokens": 604,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 293,
+            "prompt_ms": 130.801,
+            "prompt_per_token_ms": 0.44641979522184294,
+            "prompt_per_second": 2240.0440363605785,
+            "predicted_n": 311,
+            "predicted_ms": 3577.644,
+            "predicted_per_token_ms": 11.540787096774192,
+            "predicted_per_second": 86.6492026596274
+          },
+          "valid_json": true,
+          "expected_schema": true,
+          "end_to_end_output_tokens_per_second": 83.04266841765012
+        }
+      ],
+      "plain_decode_median_tokens_per_second": 87.19959958886568
+    },
+    {
+      "model": "Index-Nailong-2B.Q4_K_M.gguf",
+      "startup_seconds": 2.009858899982646,
+      "cases": [
+        {
+          "id": "plain_translation_1",
+          "wall_seconds": 3.5103070000186563,
+          "text": "When the rain stopped, Lin Zhou had already reached the old station. The clock on the platform was ten minutes slow, yet there was not a single passenger in the waiting room.\n\nHe took out a map from his pocket, folded four times, and carefully searched for the small town on the other side of the river. There was no bridge on the map, only a dashed line drawn in blue ink. The attendant told him that before winter came, the last ferry would set sail every evening at six.\n\n\"If I can't make it today, I'll stay here for the night,\" the attendant said as he pushed open the window. A cool breeze brought in the smell of damp earth. Lin Zhou remembered the last sentence his sister wrote in the letter: Don't worry, we're waiting for you, not that box.\n\nHe put the map away and temporarily stored the heavy wooden box in the luggage room. The number on the receipt was twenty-seven, the same as the number on the back of the envelope. This coincidence made him pause for a moment, but he ultimately did not turn back to ask, instead following the small path in front of the station toward the river.\n\nBefore the sun set, he finally saw the ferry. The boatman did not rush him, only raising his hand to point to the empty space at the bow. The first light in the distant town lit up, and the wind on the river gradually calmed down.",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 295,
+            "prompt_tokens": 249,
+            "total_tokens": 544,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 249,
+            "prompt_ms": 111.02,
+            "prompt_per_token_ms": 0.44586345381526105,
+            "prompt_per_second": 2242.8391280850296,
+            "predicted_n": 295,
+            "predicted_ms": 3365.952,
+            "predicted_per_token_ms": 11.448816326530613,
+            "predicted_per_second": 87.34527408590496
+          },
+          "end_to_end_output_tokens_per_second": 84.03823369250387
+        },
+        {
+          "id": "plain_translation_2",
+          "wall_seconds": 3.453883100009989,
+          "text": "When the rain stopped, Lin Zhou had already reached the old station. The clock on the platform was ten minutes slow, yet there was not a single passenger in the waiting room.\n\nHe took out a map from his pocket, folded four times, and carefully searched for the small town on the other side of the river. There was no bridge on the map, only a dashed line drawn in blue ink. The attendant told him that before winter came, the last ferry would set sail every evening at six.\n\n\"If I can't make it today, I'll stay here for the night,\" the attendant said as he pushed open the window. A cool breeze brought in the smell of damp earth. Lin Zhou remembered the last sentence his sister wrote in the letter: Don't worry, we're waiting for you, not that box.\n\nHe put the map away and temporarily stored the heavy wooden box in the luggage room. The number on the receipt was twenty-seven, the same as the number on the back of the envelope. This coincidence made him pause for a moment, but he ultimately did not turn back to ask, instead following the small path in front of the station toward the river.\n\nBefore the sun set, he finally saw the ferry. The boatman did not rush him, only raising his hand to point to the empty space at the bow. The first light in the distant town lit up, and the wind on the river gradually calmed down.",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 295,
+            "prompt_tokens": 249,
+            "total_tokens": 544,
+            "prompt_tokens_details": {
+              "cached_tokens": 245
+            }
+          },
+          "timings": {
+            "cache_n": 245,
+            "prompt_n": 4,
+            "prompt_ms": 38.467,
+            "prompt_per_token_ms": 9.61675,
+            "prompt_per_second": 103.98523409675826,
+            "predicted_n": 295,
+            "predicted_ms": 3384.963,
+            "predicted_per_token_ms": 11.513479591836735,
+            "predicted_per_second": 86.85471598951008
+          },
+          "end_to_end_output_tokens_per_second": 85.41111307419375
+        },
+        {
+          "id": "plain_translation_3",
+          "wall_seconds": 3.4334861999959685,
+          "text": "When the rain stopped, Lin Zhou had already reached the old station. The clock on the platform was ten minutes slow, yet there was not a single passenger in the waiting room.\n\nHe took out a map from his pocket, folded four times, and carefully searched for the small town on the other side of the river. There was no bridge on the map, only a dashed line drawn in blue ink. The attendant told him that before winter came, the last ferry would set sail every evening at six.\n\n\"If I can't make it today, I'll stay here for the night,\" the attendant said as he pushed open the window. A cool breeze brought in the smell of damp earth. Lin Zhou remembered the last sentence his sister wrote in the letter: Don't worry, we're waiting for you, not that box.\n\nHe put the map away and temporarily stored the heavy wooden box in the luggage room. The number on the receipt was twenty-seven, the same as the number on the back of the envelope. This coincidence made him pause for a moment, but he ultimately did not turn back to ask, instead following the small path in front of the station toward the river.\n\nBefore the sun set, he finally saw the ferry. The boatman did not rush him, only raising his hand to point to the empty space at the bow. The first light in the distant town lit up, and the wind on the river gradually calmed down.",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 295,
+            "prompt_tokens": 249,
+            "total_tokens": 544,
+            "prompt_tokens_details": {
+              "cached_tokens": 245
+            }
+          },
+          "timings": {
+            "cache_n": 245,
+            "prompt_n": 4,
+            "prompt_ms": 37.041,
+            "prompt_per_token_ms": 9.26025,
+            "prompt_per_second": 107.98844523635972,
+            "predicted_n": 295,
+            "predicted_ms": 3389.954,
+            "predicted_per_token_ms": 11.530455782312925,
+            "predicted_per_second": 86.72684054119908
+          },
+          "end_to_end_output_tokens_per_second": 85.91850463833126
+        },
+        {
+          "id": "representative_segment_json",
+          "wall_seconds": 0.8041196999838576,
+          "text": "{\n  \"translations\": [\n    \"When the rain stopped, Lin Zhou had already walked to the old station.\",\n    \"The clock on the platform was ten minutes slow.\",\n    \"The administrator said: The last ferry will set sail at six in the evening.\"\n  ]\n}",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 63,
+            "prompt_tokens": 99,
+            "total_tokens": 162,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 99,
+            "prompt_ms": 80.171,
+            "prompt_per_token_ms": 0.8098080808080809,
+            "prompt_per_second": 1234.860485711791,
+            "predicted_n": 63,
+            "predicted_ms": 716.917,
+            "predicted_per_token_ms": 11.563177419354838,
+            "predicted_per_second": 86.4814197459399
+          },
+          "valid_json": true,
+          "expected_schema": true,
+          "end_to_end_output_tokens_per_second": 78.3465446764514
+        },
+        {
+          "id": "representative_style_analysis_json",
+          "wall_seconds": 6.1110998000367545,
+          "text": "{\n  \"style_guide\": \"A melancholic, introspective narrative with a focus on atmospheric description and subtle emotional undertones, blending descriptive prose with sparse dialogue.\",\n  \"characters\": [\n    \"林舟\",\n    \"管理员\",\n    \"妹妹\",\n    \"船夫\",\n    \"河对岸的小镇\",\n    \"渡船\",\n    \"行李房\",\n    \"信封\",\n    \"箱子\",\n    \"小站\",\n    \"候车室\",\n    \"站台\",\n    \"渡船\",\n    \"小站\",\n    \"候车室\",\n    \"站台\",\n    \"管理员\",\n    \"妹妹\",\n    \"船夫\",\n    \"河对岸的小镇\",\n    \"渡船\",\n    \"行李房\",\n    \"信封\",\n    \"箱子\",\n    \"小站\",\n    \"候车室\",\n    \"站台\",\n    \"管理员\",\n    \"妹妹\",\n    \"船夫\",\n    \"河对岸的小镇\",\n    \"渡船\",\n    \"行李房\",\n    \"信封\",\n    \"箱子\",\n    \"小站\",\n    \"候车室\",\n    \"站台\",\n    \"管理员\",\n    \"妹妹\",\n    \"船夫\",\n    \"河对岸的小镇\",\n    \"渡船\",\n    \"行李房\",\n    \"信封\",\n    \"箱子\",\n    \"小站\",\n    \"候车室\",\n    \"站台\",\n    \"管理员\",\n    \"妹妹\",\n    \"船夫\",\n    \"河对岸的小镇\",\n    \"渡船\",\n    \"行李房\",\n    \"信封\",\n    \"箱子\",\n    \"小站\",\n    \"候车室\",\n    \"站台\",\n    \"管理员\",\n    \"妹妹\",\n    \"船夫\",\n    \"河对岸的小镇\",\n    \"渡船\",\n    \"行李房\",\n    \"信封\",\n    \"箱子\",\n    \"小站\",\n    \"候车室\",\n    \"站台\",\n    \"管理员\",\n    \"妹妹\",\n    \"船夫\",\n    \"河对岸的小镇\",\n    \"渡船\",\n    \"行李房\",\n    \"信封\",\n    \"箱子\",\n    \"小站\",\n    \"候车室\",",
+          "finish_reason": "length",
+          "usage": {
+            "completion_tokens": 512,
+            "prompt_tokens": 293,
+            "total_tokens": 805,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 293,
+            "prompt_ms": 131.688,
+            "prompt_per_token_ms": 0.4494470989761092,
+            "prompt_per_second": 2224.9559565032505,
+            "predicted_n": 512,
+            "predicted_ms": 5942.687,
+            "predicted_per_token_ms": 11.62952446183953,
+            "predicted_per_second": 85.98803874409
+          },
+          "valid_json": false,
+          "expected_schema": false,
+          "end_to_end_output_tokens_per_second": 83.78197325413024
+        }
+      ],
+      "plain_decode_median_tokens_per_second": 86.85471598951008
+    }
+  ]
+}
