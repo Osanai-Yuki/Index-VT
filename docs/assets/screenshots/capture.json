@@ -1,0 +1,100 @@
+{
+  "capturedAt": "2026-10-19T13:52:41.916Z",
+  "captureDate": "2026-10-19",
+  "sourceCommit": "7fea3c28edfd937f4bf88e98c827b240e136c13b",
+  "executableSHA256": "fb2d5bf473dd8205f2fe1de36d84e4dc8dd5f9fb499e9ccfd99035a3865f3ba3",
+  "buildAssets": [
+    {
+      "file": "assets/geist-mono-latin-wght400-500-BUpMemCO.woff2",
+      "sha256": "f7e0130cf9420fe8b98f819a531a61dd3d7909320c117e46b295318c1430917a"
+    },
+    {
+      "file": "assets/index-BEvTqSPE.css",
+      "sha256": "5b7bdf45f7aa66dd2cfdc2a86810e1ba5b55fefb486b0a77ad1e7c85d4019221"
+    },
+    {
+      "file": "assets/index-C9Ups94A.js",
+      "sha256": "fb3b21ea9cf1d0800657256b8310ab4642abcca4e9acb1829ce70ba0a480b302"
+    },
+    {
+      "file": "assets/noto-sans-sc-cjk-wght400-600-BW3KsRh3.woff2",
+      "sha256": "67b78b88e69ea1c00d3970f21ae46c926565f42cd405b468a201ac3a03686df0"
+    },
+    {
+      "file": "assets/public-sans-latin-wght400-600-Bmpfeiuh.woff2",
+      "sha256": "901cfb02ef5a43ddeb0df74c70a6602ea774dbd27caccdc135fe37cc7147ada0"
+    }
+  ],
+  "captureMethod": "Exact production frontend embedded in the current executable, rendered in Chromium with an isolated sample bridge.",
+  "data": "Predefined public sample text and translations; no real inference, GPU measurements or private user data.",
+  "sourceLanguage": "Chinese",
+  "targetLanguage": "English",
+  "source": "周六清晨，我们沿着河边的小路走到旧书店。店主把新到的书放在窗边，还给来客准备了热茶。\n\n下午的读书会改到三点开始。请提前十分钟到场，并带上想与大家分享的一段文字。\n\n如果下雨，我们就在二楼的小厅见面；天气晴朗时，活动会移到院子里。",
+  "translation": "Early on Saturday morning, we followed the riverside path to the old bookshop. The owner had placed the new arrivals by the window and prepared hot tea for visitors.\n\nThe afternoon reading group will now begin at three. Please arrive ten minutes early and bring a passage you would like to share.\n\nIf it rains, we will meet in the small room upstairs. If the weather is fine, we will move to the courtyard.",
+  "subtitlePairs": [
+    [
+      "周六清晨，我们沿着河边的小路出发。",
+      "Early on Saturday morning, we set off along the riverside path."
+    ],
+    [
+      "旧书店就在桥的另一边。",
+      "The old bookshop was just across the bridge."
+    ],
+    [
+      "店主把新到的书放在窗边。",
+      "The owner had placed the new arrivals by the window."
+    ],
+    [
+      "他还给来客准备了热茶。",
+      "He had also prepared hot tea for visitors."
+    ],
+    [
+      "下午的读书会改到三点开始。",
+      "The afternoon reading group will now begin at three."
+    ],
+    [
+      "请提前十分钟到场。",
+      "Please arrive ten minutes early."
+    ],
+    [
+      "如果下雨，我们就在二楼见面。",
+      "If it rains, we will meet upstairs."
+    ],
+    [
+      "天气晴朗时，活动会移到院子里。",
+      "If the weather is fine, we will move to the courtyard."
+    ]
+  ],
+  "screenshots": [
+    {
+      "file": "translation-light.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "1a940ea46cce47a7dd88c67d7c4a95133d08adeb1de74287c3a2cd9f3ede182f"
+    },
+    {
+      "file": "subtitles.png",
+      "width": 1440,
+      "height": 900,
+      "sha256": "cb9ee8a25f72d2d04635f988301bf77727aa86648d96a5e1a4b7c32b2f417557"
+    }
+  ],
+  "screenshotCalls": [
+    "NoteWorkspace",
+    "NoteWorkspace",
+    "ListHistory",
+    "NoteWorkspace",
+    "GetConfig",
+    "GetLanguages",
+    "GetSystemStatus",
+    "WarmDefaultModel",
+    "GetSystemStatus",
+    "KeepAlive",
+    "NoteWorkspace",
+    "ListGlossaries",
+    "SubOpen",
+    "SubStyles",
+    "NoteWorkspace",
+    "KeepAlive"
+  ]
+}

@@ -4,15 +4,15 @@
 
 English · [简体中文](README.zh-CN.md)
 
-I built Index-VT to keep translation, terminology, and subtitle editing in one desktop workspace. It runs IndexTeam's translation models through a local `llama-server` process, so the text you translate stays on your computer. Once the engine and models are installed, translation works offline; model downloads require a network connection.
+I built Index-VT to bring text translation, terminology, and subtitle editing into one desktop application. It runs IndexTeam's models locally through `llama-server`. After installing the engine and models, you can translate offline without sending your text to a cloud translation service.
 
-Developed and maintained by **Osanai-Yuki**. This is an independent desktop application; the upstream models and inference engine belong to their respective authors.
+Developed and maintained by **Osanai-Yuki**. Index-VT is an independent project; the models and inference engine are developed by their respective upstream teams.
 
-> **Development preview.** The workflows below are implemented, but testing on real hardware is still in progress. The interface is primarily Simplified Chinese, with some English labels. These two README versions do not imply a fully localized English interface.
+> **Development preview.** Features are available for testing, with further hardware and workflow validation in progress. The application interface is primarily Simplified Chinese, with some English labels.
 
 ![Index-VT translation workspace](docs/assets/screenshots/translation-light.png)
 
-*Translation workspace, captured on 2026-10-17 with development demo data. Screenshots illustrate the interface; they are not translation-quality or performance benchmarks.*
+*Current interface, updated on 2026-10-19. The text and translations are public samples prepared for the screenshots. See the [capture notes](docs/assets/screenshots/README.md) for the build and rendering method.*
 
 ## What you can do
 
@@ -21,12 +21,12 @@ Developed and maintained by **Osanai-Yuki**. This is an independent desktop appl
 | Text translation | Streaming output, source/target language selection, built-in and custom translation presets, terminology hints, local history and favorites. |
 | Subtitles | Import SRT, ASS, VTT, and LRC; translate a queue; pause, cancel, and retry failures; edit text and timing; split/merge cues; shift/calibrate timing; undo/redo edits; export translated or bilingual subtitles. |
 | Long documents | Import TXT or Markdown, translate in chunks with Index-Nailong, continue an interrupted task during the same application session, inspect terminology matches, and export translation or bilingual text. |
-| Models and terminology | Download supported GGUF models, choose Q4_K_M or Q8_0, manage detected model files, and create/import/export glossary books using CSV or TSV. |
+| Models and terminology | Download supported GGUF models, choose Q4_K_M or Q8_0, and manage detected model files. Create and edit glossary books, import CSV/TSV, and export CSV. |
 | Desktop controls | Light/dark/system themes, inference settings, local diagnostics, startup model loading, and automatic model release after inactivity. |
 
 ![Index-VT subtitle workspace](docs/assets/screenshots/subtitles.png)
 
-*Subtitle workspace with demo cues. The built-in preview is intended for editing; check complex ASS effects in your target player.*
+*Eight Chinese-to-English sample cues, with the selected cue's timing and text controls open. The built-in preview is for editing; check complex ASS effects in your target player.*
 
 ## Getting started
 
@@ -35,11 +35,11 @@ Developed and maintained by **Osanai-Yuki**. This is an independent desktop appl
 - **Windows 10/11, x64**, with Microsoft Edge WebView2 Runtime. This project currently targets Windows only.
 - A compatible Windows build of **[llama.cpp](https://github.com/ggml-org/llama.cpp/releases)**, including `llama-server.exe` and the DLLs from that build.
 - At least one supported GGUF model. An NVIDIA GPU with a compatible CUDA runtime is optional; CPU inference is available but speed depends on your machine.
-- Enough disk space for the application, runtime, selected models, and local data. A Q4_K_M model is roughly 1.3 GB; Q8_0 is roughly 2.2 GB. These are model-file sizes, not RAM or VRAM requirements.
+- Disk space for the application, runtime, selected models, and local data. Each Q4_K_M model is roughly 1.3 GB and Q8_0 roughly 2.2 GB on disk; runtime memory usage depends on the model and context settings.
 
 ### Set up a portable folder
 
-If a release is available in this repository's **Releases** section, read its asset description first. An application-only archive does **not** contain the inference engine or models. GitHub's automatically generated source archives are source code, not a runnable Windows package.
+Check this repository's **Releases** section for downloadable builds and read the package description. An **app-only** archive needs the engine and models installed separately. GitHub's **Source code** archives are for building from source.
 
 Extract the application to a writable folder and arrange the runtime like this:
 
@@ -57,7 +57,7 @@ Index-VT/
 1. Start `Index-VT.exe` and follow the first-run setup.
 2. Download **Index-Translate-2B / Q4_K_M** as a starting point, or place an official supported model file in `models/` before startup.
 3. Open the translation workspace, choose a target language, and translate a short sample.
-4. Download Nailong or Homura only when you need their specialized workflows.
+4. Add Nailong for long documents or Homura for dubbing-oriented text when needed.
 
 Models and runtime binaries are excluded from the source repository. A fresh clone needs them too; cloning the project alone does not install the engine.
 
@@ -76,7 +76,7 @@ The model manager supports **Q4_K_M** and **Q8_0**. For manual installation, kee
 - **Text:** choose the languages and a preset, enter your text, then translate. `Ctrl+Enter` starts a translation; `Esc` cancels it.
 - **Subtitles:** import a file, choose a language and optional glossary, translate, inspect the result, then export. Cancel the active queue before editing. Undo history is limited to 20 steps and a memory budget; starting a new translation clears it.
 - **Documents:** import a TXT/MD file and select one of the supported directions. The current import limit is **2 MiB and 50,000 Unicode characters**. Export the result before closing the application.
-- **Glossaries:** manage books in the model/terminology workspace. Entries guide the model through the prompt; they are not guaranteed text replacements or a semantic consistency score.
+- **Glossaries:** manage books in the model/terminology workspace. Entries are passed to the model as translation hints. Review the result: term-match counts help locate passages, but do not establish semantic consistency.
 
 After setup, the saved default model loads at startup. With no active task, **30 minutes without input** starts a **30-second countdown** to release the model; interaction cancels the countdown, and a later task loads the model again.
 
@@ -90,7 +90,7 @@ The normal portable layout keeps data beside the executable:
 | `models/data/indexvt.db` | Local settings, text history, glossary books, and model records. |
 | `logs/` | Application/engine logs and diagnostic archives, if enabled. |
 
-The app sends inference requests to `127.0.0.1`; translation does not need a cloud API key. There is no application telemetry. Model downloads contact the configured model host. Logging is off by default; changing it requires a restart. Diagnostic files may contain local paths, so inspect them before sharing.
+Inference runs on `127.0.0.1`, without a cloud API key or application telemetry. Model downloads contact the selected model host. Logging is off by default, and changes to that setting take effect after restarting. Check diagnostic files for local paths and other information before sharing them.
 
 **Export subtitle and document work before exiting.** Switching pages preserves the current session, but those workspaces do not automatically restore unfinished work after a full application restart. Back up the portable folder with the application closed if you want to retain models, settings, history, and glossaries. Development builds can resolve their data folder above the executable; see the [development guide](docs/DEVELOPMENT.md).
 
@@ -108,13 +108,13 @@ node scripts/build.mjs
 
 The executable is written to `app/build/bin/Index-VT.exe`. Add the runtime/model files as described above to use it.
 
-**Use the build script for a production build.** It builds the frontend, copies it into Go's embed directory, and then builds the executable. A direct `wails build` does not perform that synchronization in this repository and can embed an older interface.
+**Build production releases with this script.** It builds the frontend, synchronizes Go's embed directory, then compiles the executable. Running `wails build` directly can leave an older interface embedded in the application.
 
 For local development, test commands, and browser demos, see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Current limitations
 
-I am still validating real Windows workflows and translation quality across representative material. Browser checks with demo data do not establish model quality or complete native-dialog coverage.
+I am continuing to test native Windows workflows and translation quality on representative material. Browser tests cover interface behavior; real model inference, native dialogs, and hardware compatibility need separate checks.
 
 - Translation can omit, distort, or invent content. Check important output against the source; terminology-match counts are review hints.
 - Full restart recovery is not available for subtitle/document sessions. A document continuation uses the original task's direction and terminology.
@@ -122,11 +122,11 @@ I am still validating real Windows workflows and translation quality across repr
 - Homura's syllable count and the displayed GPU-memory estimates are approximate; neither is a hardware or output guarantee.
 - Real IME input, unusual display scaling, interrupted downloads, low disk space, CPU performance, and driver/OOM recovery still need broader acceptance testing.
 
-Existing engineering records are indexed in [docs/README.md](docs/README.md). They are dated evidence, not a promise that every scenario has passed on every machine.
+Dated test results and engineering notes are indexed in [docs/README.md](docs/README.md), with the scope and limitations of each check recorded alongside the results.
 
 ## Feedback
 
-When reporting a problem, include the application version (`Index-VT.exe -version`), Windows version, GPU/CPU, model and quantization, selected context size, and the steps to reproduce. A small input you are comfortable sharing is more useful than an entire private document. Attach logs only after checking their contents.
+To report a problem, include the application version (`Index-VT.exe -version`), Windows version, GPU/CPU, model and quantization, context size, and steps to reproduce. Include a small sample you can share publicly, and review any logs before attaching them.
 
 ## Copyright and licensing
 

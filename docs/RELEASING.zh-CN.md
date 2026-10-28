@@ -2,7 +2,7 @@
 
 [项目介绍](../README.zh-CN.md) · [开发指南](DEVELOPMENT.md) · [协议选择](LICENSING.zh-CN.md)
 
-本指南按个人维护的 Windows x64 项目编写。当前仓库尚未配置远程地址，本轮只准备本地文档和 Release notes 配置，没有创建标签、推送、上传附件或发布 Release。
+本指南用于发布 Windows x64 版本。源码仓库为 `Osanai-Yuki/Index-VT`，当前主分支为 `main`。下面的命令和步骤供维护者执行，文档更新本身不会创建标签、上传附件或发布 Release。
 
 ## 首发建议
 

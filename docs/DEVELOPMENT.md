@@ -88,6 +88,8 @@ Open the following URLs in a browser while that server is running:
 
 The mock backend is a development tool. Its successful responses, apparent GPU usage, and sample translations are not evidence of real model behavior. A plain browser session without `?mock` has no Go backend.
 
+To refresh the public README images, run `node scripts/capture-readme.mjs` with a built exe and matching `app/frontenddist/`. This renders the exact embedded production frontend with an isolated public sample fixture. It does not use the development mock page or run model inference. See the [capture notes](assets/screenshots/README.md) for provenance and requirements.
+
 ## Verification
 
 Run the relevant existing checks after a code change:
