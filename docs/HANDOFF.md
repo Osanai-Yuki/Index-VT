@@ -4,7 +4,9 @@
 
 **2026-10-28 GitHub 更新归档见 §9。** §3 的公开截图与文案已形成独立提交；本文件早期章节中的“未提交”保留原快照语义。
 
-**当前主线：已有 Windows 翻译应用处于开发预览阶段；Wenyi P0 核心已在隔离分支实现并完成小样本链路验证，产品 GUI / Go 接线仍待 P1。** 上游全量回归有一项并发顺序断言未通过，边界见 §8。另有一组已生成、未提交的公开截图与说明更新，必须单独保留和交接。
+**最新 main 同步见 §10。** §8–9 保留各自执行时的分支与推送范围；本次用户明确要求只更新 `main`，其他分支和 worktree 不在修改范围。
+
+**当前主线：已有 Windows 翻译应用处于开发预览阶段；Wenyi P0 核心已在隔离分支实现并完成小样本链路验证，产品 GUI / Go 接线仍待 P1。** 上游全量回归有一项并发顺序断言未通过，边界见 §8。公开截图与说明已形成独立提交，main 同步见 §10。
 
 ## 1. Git 与协作位置
 
@@ -143,6 +145,7 @@ Go 主包需要有效 `app/frontenddist/`；缺失时先走完整构建。浏览
 | 任务 | Owner / 状态 | 建议修改范围 | 依赖与交付 |
 | --- | --- | --- | --- |
 | S：公开截图收口 | Codex `/root` 已完成（2026-10-28）；提交 `e3d7b5f` | 本文 §3 的九个文件；`E:\Code_Projects\Go\Index-VT_GUI` / `codex/wenyi-local-integration` | 中英文核对、脚本语法、8 项 SHA-256 与图片目视检查完成；下一步按需复用截图 |
+| G-main：仅同步 main | Codex `/root` 验证与归档完成（2026-10-28，Asia/Singapore）；同步状态以 Git ref 为准 | `E:\Code_Projects\Go\Index-VT_GUI` / `main`；快进同步已提交的三笔更新，仅新增本文接续记录 | 最后完成、下一条操作与验证见 §10；其他分支及 P0 未提交实现保持原状 |
 | G：GitHub 更新 | Codex `/root` 检查与归档完成（2026-10-28）；同步范围见 §9 | 当前工作区 / `codex/wenyi-local-integration`；S 的九个文件及 `AGENTS.md`、本文、`docs/README.md`，按任务分开提交 | 用户已授权提交并推送；已获取远端与检查差异，保留其他 worktree 的未提交工作；远端最终状态以 Git ref 为准 |
 | D：main 项目简介 | Codex `/root` 已完成（2026-10-28，Asia/Singapore） | `E:\Code_Projects\Go\Index-VT_GUI` / `codex/wenyi-local-integration`；仅本文登记，简介在聊天交付；未提交 | 最后完成：核对 Git 状态、日志、worktree 与 `main`（`7fea3c2`）中英文 README，完成简介；下一步：按需使用简介。只做文案核对，未运行构建或应用测试；无阻塞 |
 | W0：Wenyi P0 | Codex `/root` 核心完成，见 §8 验证边界（2026-10-28）；未提交 | `E:\Code_Projects\Go\Index-VT_GUI-wenyi-p0` / `codex/wenyi-p0-core`；仅 P0 的 `integrations/wenyi/`、隔离夹具/新结果与必要文档；主工作区仅更新本交接记录 | 真实 Core、只读 DTO、配置/模型/预算、TXT/EPUB 跨进程续跑已出证据；上游并发顺序断言未通过；未派发子 agent |
@@ -235,3 +238,36 @@ metadata 所记录的 exe、五份前端资源、两张图片共 8 项 SHA-256 �
 
 **保留与未解决：** 其他 worktree 的未提交文件、模型、数据库、运行依赖和历史证据保留原状；
 Wenyi P0 的上游回归边界与产品未接入状态仍见 §8。本轮没有检查或提交其他 worktree 的改动。
+
+## 10. 2026-10-28：仅向 main 同步最新已提交更新
+
+Agent：Codex `/root`；工作目录 `E:\Code_Projects\Go\Index-VT_GUI`，目标分支 `main`。
+用户明确授权有更新则提交到 GitHub，且仅限 main；本节取代 §9 对本次推送目标的约定。
+
+**最后完成：** 重新读取交接，核对状态、最近提交、worktree 与 remote；
+`git fetch origin main` 成功，远端 main 为 `7fea3c2`，原工作区干净。
+切换到 main 后，使用 `git merge --ff-only ee412bc` 保留历史并同步三笔提交：
+
+- `6eb07c4`：Wenyi 方案、独立探针及历史结果，不是产品内接入。
+- `e3d7b5f`：§3 的九个公开截图、脚本与使用说明文件。
+- `ee412bc`：Agent 入口、交接文档及文档索引。
+
+本轮只新修改本文，登记 main 同步范围与实际验证。未更改其他分支 ref，
+未检查或修改其他 worktree 的未提交文件。`app/`、`frontend/`、`models/`、
+`thirdparty/` 相对远端 main 没有受版本管理的差异。
+
+**本轮实际验证：**
+
+- `node --check scripts/capture-readme.mjs` 退出码 0。
+- Python AST 语法检查与两份新增 JSON 解析退出码 0；没有执行探针或覆盖历史结果。
+- 截图 metadata 对应 exe、五份前端资源与两张图片共 8 项 SHA-256 全部匹配；两图目视检查完成。
+- `git diff --check origin/main` 退出码 0。
+- 没有应用源码改动，未运行产品构建、Go/前端全套、真实模型或 race detector。
+
+**交付与下一条操作：** 本文归档提交后，仅通过 `git push origin main:main` 推送，
+再用 `git ls-remote origin refs/heads/main` 对照本地 HEAD；本节不预写远端执行结果，
+最终状态以 Git ref 为准。完成同步后，产品后续任务仍按 §8 认领。
+
+**未解决与保留范围：** Wenyi P0 实现仍只在独立 worktree；产品未接入和已有字幕/文档
+不能跨重启恢复的边界不变。模型、数据库、运行依赖和历史验收证据均保留。
+本次不创建标签、Release 或程序包，不推送其他分支。
